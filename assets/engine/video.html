@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lesson video renderer</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; background: #000; transform-origin: 0 0; }
+  .slide { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; display: none; overflow: hidden; will-change: transform, opacity; }
+  .slide.on { display: block; }
+  .kb { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 50% 50%; }
+  .kb > img { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; display: block; }
+  .cover, .chip { position: absolute; }
+  .chip { background-repeat: no-repeat; background-size: 1920px 1080px; will-change: transform, opacity; }
+  .fx { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; overflow: visible; }
+  #streak { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; pointer-events: none; opacity: 0; z-index: 40;
+            background: linear-gradient(100deg, transparent 45%, var(--accent, #FCA311) 50%, transparent 55%); }
+  #countdown { position: absolute; right: 70px; bottom: 90px; width: 150px; height: 150px; opacity: 0; z-index: 50; }
+  #countdown .num { position: absolute; left: 0; top: 0; width: 150px; height: 150px; display: flex; align-items: center; justify-content: center;
+                    font: 700 56px Arial, "Liberation Sans", Helvetica, sans-serif; color: var(--text, #fff); }
+  #hud { position: fixed; left: 12px; bottom: 12px; color: #fff; font: 14px Arial, sans-serif; opacity: .7; z-index: 99; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script src="video.js"></script>
+</body>
+</html>

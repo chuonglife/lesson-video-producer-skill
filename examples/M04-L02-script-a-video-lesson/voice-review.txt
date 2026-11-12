@@ -1,0 +1,3 @@
+M04-L02-script-a-video-lesson.voice.mp3: 605 script words, 605 heard, 0 suspect places (filtered: exception 0, second listen 2, short word 1, outside narration 0, invented 0)
+  -- filtered automatically, listed so you can check:
+    4:41.5 insert ''>'we' (short word)

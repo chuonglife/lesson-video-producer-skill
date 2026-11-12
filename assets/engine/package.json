@@ -1,0 +1,10 @@
+{
+  "name": "lesson-video-producer-engine",
+  "private": true,
+  "type": "module",
+  "description": "Frame renderer for the Lesson Video Producer skill (headless Chrome + ffmpeg)",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer-core": "^25.15.0"
+  }
+}

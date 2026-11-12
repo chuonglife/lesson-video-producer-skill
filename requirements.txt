@@ -1,0 +1,9 @@
+python-pptx>=0.6.21
+numpy>=1.24
+Pillow>=9.0
+opencv-python>=4.8      # smooth_scroll.py (screen recordings)
+faster-whisper>=1.0     # review_voice.py (Whisper check of the narration)
+# Voice engines (install in this environment or in their own, then set KOKORO_PYTHON / VIENEU_PYTHON):
+#   kokoro>=0.9  soundfile    -> English and 8 other languages (Python 3.10-3.12)
+#   VieNeu-TTS                -> Vietnamese, see its repository
+# Windows only, for record_screen.py: pywin32
