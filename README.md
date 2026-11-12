@@ -13,6 +13,7 @@ It is the fourth skill in a set for course creators:
 - [Lesson Content Writer](https://github.com/chuonglife/lesson-content-writer-skill) writes each lesson in full.
 - [Lesson Slide Designer](https://github.com/chuonglife/lesson-slide-designer-skill) turns each lesson into slides and a narration script.
 - **Lesson Video Producer** turns the slides into the finished video.
+- [Lesson Assessment Designer](https://github.com/chuonglife/lesson-assessment-designer-skill) writes the quiz, test and assignment with a rubric for each lesson, straight from its objectives.
 
 ## Contents
 
