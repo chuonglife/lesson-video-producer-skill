@@ -122,7 +122,10 @@
           if (a.shape === 'ellipse') {
             // hand-drawn ellipse: 1.15 turns, radius wobbles slightly with the angle (seeded by position so re-renders match)
             // radii 1.22x the half-size: an ellipse touching the box would cut through text in the card's corners
-            const rx = c.bw / 2 * 1.22 + 6, ry = c.bh / 2 * 1.22 + 6, cx = c.cx, cy = c.cy, pts = [];
+            const cx = c.cx, cy = c.cy, pts = [];
+            // keep the stroke 20 px inside the frame: a card at the edge would otherwise lose part of its circle
+            const rx = Math.max(c.bw / 2 + 18, Math.min(c.bw / 2 * 1.22 + 6, cx - 20, W - 20 - cx));
+            const ry = Math.max(c.bh / 2 + 14, Math.min(c.bh / 2 * 1.22 + 6, cy - 20, H - 20 - cy));
             const seed = (c.bx * 7 + c.by * 13) % 97;
             for (let ang = -.6; ang <= Math.PI * 2.3; ang += .12) {
               const w = 1 + .025 * Math.sin(ang * 3 + seed) + .018 * Math.cos(ang * 5 + seed * .7);
