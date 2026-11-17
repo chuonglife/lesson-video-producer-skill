@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.2.0 - 2026-11-17
+
+Fixes and features from recording a real course with `record_actions.py`: every item below comes from a take that failed or a video a learner could not follow. Videos without a long take render exactly as before (checked on the example lesson: storyboard and narration byte-identical; a long take without inserts renders frame-identical with identical metrics).
+
+### Recording from an action script (`record_actions.py`)
+
+- **The window is brought to the front, or the take stops.** Keys once went into another window because Windows refused `SetForegroundWindow` (the taskbar held the focus): the clip was empty and the next step failed because a folder had not been created. Now each step tries a synthetic Alt, `AttachThreadInput` to the thread holding the focus, `SwitchToThisWindow`, then a click on the recorded window's own title bar (only if that point belongs to it), up to 6 times 1.5 s apart, because a background program can grab the focus for a moment. If the window is still not in front, the script stops without sending a key.
+- **PowerShell windows find `claude`.** `wt.exe` opens a tab inside the Windows Terminal process that is already running, with the PATH it had when it started, so typing `claude` answered "is not recognized". A PowerShell window now runs a small `.ps1` silently before its prompt: the PATH of the recording process plus the Machine and User PATH from the registry, an alias from `claude` to the real executable (the npm shim is not found inside the Terminal session even with the right PATH), and no `CLAUDE_*` variables. Give Claude about 8 s to start (`{"pause": 8}`), now in the docs.
+- **"is not recognized" stops the take.** After an Enter, if the shell says the command is not recognized, the recording stops at once instead of typing the prompt into PowerShell. `"allow_error": true` on a key step turns it off.
+- **New step `if_text`**: `{"if_text": {"text": "...", "goto_mark": "..."}}` skips to a later mark when the text is on screen (case-sensitive, so the typed prompt does not trigger it). Used when a job may already be done and "Continue" is not needed. A jump to a mark that is not later in the script is refused.
+- **New step `wait_file`**: for jobs of an hour or more, where Claude Code works in the background and hands the turn back several times, so a still screen says nothing. It waits for the result file, types a nudge such as "Continue" every `nudge_every` seconds only while the busy text is not on screen, and answers prompts like `wait_done`. The nudge is checked for private text like any typed string.
+- **A warning before `/exit`.** Claude Code once handed the turn back while `pip install kokoro` still ran in the background; `/exit` showed "Background work is running", Enter picked "Exit and stop tasks" and the install was killed. Every `/exit` in a script now prints a warning to wait for Claude to report the work done first.
+- **New `scripts/close_recording_windows.py`**: closes windows left from an earlier take one tab at a time (Ctrl+C twice, then Ctrl+Shift+W). Closing a multi-tab window as a whole showed "Do you want to close all tabs?", which ended up in the next clip.
+
+### Showing the real artifact in a long take
+
+- **New `scripts/insert_artifacts.py`, `inserts` in `<clip>.longtake.json`.** A test viewer saw "Done" in the terminal but never the document Claude had written. Now, right after a result, the long take can show the real file: .docx/.pdf pages (LibreOffice and Poppler), .md/.txt/.json/.csv as large text, a deck (its slide images, overview first), an image, or part of a video with its sound. It is built from the file at render time, no extra window recorded, with an "Opening: <file>" label on a 132 px band kept free at the top. Each insert is a segment of its own, so it carries its own narration, stretches or shrinks (at most 30%, never a video) to fit it, and `fit` writes `pause_after` on the insert itself. `long_take.py`, `composite_clips.py` (mixes a video insert's sound, at 0.35 under narration) and `check_video.py` (lists inserts; their fades are not jumpy scrolls) know about it. The audio mix gives the base track its own label before `amix`; without it ffmpeg stops with "Trailing garbage after a filter", as it did in the first take with a video insert.
+- Text inserts read files with a byte order mark correctly (a BOM had turned "# Title" into plain text).
+
+### Voice and sound
+
+- **`review_voice.py` stops less often for nothing.** In English it compares a compact form (number words as digits, no spaces or hyphens), so "lesson two" / "lesson 2" and "mac os" / "macos" are equal; a review once stopped the whole run after three regenerations of a line that was read correctly. New `assets/whisper-homophones-en.txt`: `said>heard` pairs every English review accepts (Whisper writes "clawed", "cloud" or "clod" for Claude, "jason" for JSON, "forth" for fourth). The report counts them under "same words" and "exception".
+- `make_voice.py`: Kokoro now reads its own name right ("Kokoro" -> "Koh-koh-roh" in the Kokoro pronunciation table).
+- `make_video.py` and `mix_audio.py`: the music bed defaults to **-28 dB** instead of -22, which sounded loud under the voice. `--music-db -22` gives the old level.
+
+### Docs
+
+- README: recording from an action script is the default way to record a how-to; optional LibreOffice and Poppler in "Before you start".
+- SKILL.md: step 2b covers `wait_file`, `if_text`, the 8 s start, `close_recording_windows.py` and the artifact inserts; step 4 adds "watch it as a learner would".
+- `references/screen-recording.md`: section 6.1 (PowerShell start, focus, the two new steps, background work and `/exit`) and a new section 6.5 (inserts). `references/narration-voice.md` and `references/motion-and-sound.md` updated.
+
 ## v1.1.0 - 2026-11-17
 
 Install fixes from a test run as a new user on Windows 11 (Python 3.12 in a venv, Node, ffmpeg).

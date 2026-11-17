@@ -57,7 +57,7 @@ Neighbouring slides **never share a transition** (the script rotates). Transitio
 
 - **The voice**: everything else serves it.
 - **Effects** (`assets/sfx/`, synthesised by `make_sfx.py`, WAV 44.1 kHz stereo): `ui1-3` pentatonic marimba, `pop1-2` bubbles, `click`, `swoosh`/`whoosh` panned air, `circle`, `underline`, `transition` (long swoosh with a sparkle), `typing`, `ting`, `success`. Peaks around -19 to -23 dBFS. Density: any two at least 0.22 s apart, the same one at least 0.35 s apart; extra ones are dropped, except transition, ting and success.
-- **Music**: `assets/music/piano-bed.mp3` (synthesised piano, 240 s, looped; Cmaj7-Am7-Fmaj7-G6 at 66 bpm) at -22 dB (`--music-db`), sidechain-ducked by the voice (threshold 0.03, ratio 4:1, release 700 ms), 2.5 s fade in, 3.5 s fade out. No organ pads, no water or wind. Interviews or long recordings: `--no-music`. `make_music.py --seed N` makes a different bed per course.
+- **Music**: `assets/music/piano-bed.mp3` (synthesised piano, 240 s, looped; Cmaj7-Am7-Fmaj7-G6 at 66 bpm) at -28 dB (`--music-db`; it was -22 until v1.1, which sounded loud under the voice), sidechain-ducked by the voice (threshold 0.03, ratio 4:1, release 700 ms), 2.5 s fade in, 3.5 s fade out. No organ pads, no water or wind. Interviews or long recordings: `--no-music`. `make_music.py --seed N` makes a different bed per course.
 - Levels: the mix is normalised to -18 LUFS (TP -2); the final mux to -16 LUFS (TP -1.5, LRA 11). The report must read -20 to -15 LUFS.
 
 ## 6. `video.json` syntax (next to the storyboard, keys are slide ids)

@@ -71,6 +71,21 @@ Terminal text is read with UI Automation (the real text of Windows Terminal, no 
 
 With the real Claude Code (tested with `claude` 2.1, creating real files): the script opens `claude` in the demo course folder (already signed in). It resolves the real `claude.exe` (wt.exe cannot start the npm shim: error 0x80070002), removes the `CLAUDE_*` variables of the controlling session from the environment, and refuses `;` in the command (wt.exe splits commands at `;`). The first `wait_done` answers the "Accessing workspace" prompt (**its default is "No, exit"**: answer `["Down", "Enter"]`) and "Chrome extension detected" (`Esc`). After each prompt typed for Claude comes a `wait_done` with `"busy": "esc to interrupt"` (it must appear, then go) and an answer for "Do you want" (`Enter`). Do not type `/exit` or `exit` at the end: the machine stops the recording first and then closes the window. The first time you record a new program, run `--dry-run` and read the "visible text (end)" line to pick the right busy text.
 
+Starting from a PowerShell window instead (`"command": ["powershell", "-NoLogo"]`, then `type` "claude", `key` Enter): wt.exe opens the tab inside the Windows Terminal process that is already running, with the PATH it had when it started, so `claude` used to answer "is not recognized". The script now writes a small `.ps1` that runs silently before the prompt: it loads the PATH of the recording process plus the Machine and User PATH from the registry, aliases `claude` to the real executable and removes `CLAUDE_*`. Give Claude about 8 s to start (`{"pause": 8}`) before the first answer or prompt. If the shell still answers "is not recognized" after an Enter, the recording stops at once instead of typing the prompt into PowerShell (`"allow_error": true` on a `key` step turns the check off).
+
+Focus: before every step the recorded window is brought to the front. Windows sometimes refuses (a notification, an office suite starting in the background or the taskbar holds the focus), so the script tries a synthetic Alt, then attaches its input thread to the one holding the focus, then `SwitchToThisWindow`, then a click on the title bar of the recorded window (only if that point really belongs to it), up to 6 times 1.5 s apart. If the window is still not in front it STOPS without sending a key: keys typed into another window are worse than a failed take. Before a new take, `python scripts/close_recording_windows.py` closes windows left from earlier takes (titles containing `REC-`, or `--match`) one tab at a time with Ctrl+Shift+W, after Ctrl+C twice; closing a multi-tab window as a whole would show "Do you want to close all tabs?" in the next clip.
+
+Two steps for long and uneven jobs:
+```json
+{"wait_file": {"file": "course/INDEX.md", "max": 21600, "nudge": "Continue", "nudge_every": 900, "busy": "esc to interrupt",
+               "answer": [{"text": "Do you want", "keys": "Enter"}]}}
+{"if_text": {"text": "All lessons built", "goto_mark": "result"}}
+```
+- `wait_file`: a job of an hour or more runs in the background and Claude Code hands the turn back several times, so "the screen is still" says nothing. The step waits until the file exists (relative to the window's `cwd`); every `nudge_every` seconds, if the file is still missing and the busy text is not on screen, it types the nudge and Enter. Prompts are answered as in `wait_done`.
+- `if_text`: if the text is on screen now, every step up to the named mark is skipped (the job is already done, no "Continue" needed). The match is case-sensitive, so the same words in the prompt you typed do not trigger it. The mark must come later in the script, otherwise the script is refused.
+
+Background work and `/exit`: Claude Code can hand the turn back while an install or a render still runs in the background. Typing `/exit` then shows "Background work is running", and Enter picks "Exit and stop tasks". The script warns about every `/exit` it finds; put a wait before it that lasts until Claude reports the work is done (a `wait_done` with a long `start_within`, or a `wait_file`). In a lesson, tell learners the same: wait for Claude to say it is done before leaving.
+
 **Required: review the result.** After every job (every `wait_done` with `busy`) there must be a `review_result` step before the next typing or before the end of the script; otherwise the script is refused before recording. Waive it only with a reason: `--skip-review "<reason>"`, `"skip_review": "<reason>"` in the script, or `"no_review": "<reason>"` on the `wait_done` step (the reason is printed and stored in `take.json`).
 ```json
 {"review_result": {"speed": 160, "dwell": 2.5, "chunk_px": 360, "up_px": 1100, "files": ["notes.md"], "line_px": 26, "hold": 3, "zoom": [0, 0, 0.62, 0.62]}}
@@ -115,3 +130,20 @@ Highlights: an orange ripple at each click (0.6 s); a key label in the bottom ri
 The report `_check/<name>.report.md` adds a "Long take" line: source seconds -> output seconds, waits cut and seconds cut, fast-forwards and their speeds, seconds held, zoom boxes, largest zoom, step and jerk, clicks, key labels, masks, the fastest action piece (above 1.25x is a hard failure). Fast-forward and cut pieces are not counted as jumpy scrolls. Details in `_check/long-take.json`. A video without `long_take` renders exactly as before.
 
 A quick test without slides: `long_take.py render <clip> <out.mp4> [--group-seconds 12,30,8]`.
+
+### 6.5 Showing the real artifact after each result (`inserts`)
+
+When Claude Code reports a job done, learners must SEE what it made (a document, a deck, a video), not only the line in the terminal. No extra window is recorded: at render time `long_take.py` inserts a piece of picture built from the artifact file itself, right after the result review. Declare it in `<clip>.longtake.json`:
+```json
+"inserts": [
+  {"after": 72.64, "file": "D:/demo-course/program.docx", "pages": [1, 2], "seconds": 14,
+   "zoom": [{"from": 6, "to": 11, "box": [330, 300, 900]}], "narration": "This is the program Claude just wrote."},
+  {"after_end_of": "step-12", "file": "D:/demo-course/slides/lesson-1/lesson-1.pptx", "pages": [1, 5]},
+  {"after": 90, "file": "D:/demo-course/videos/lesson-1.mp4", "start": 20, "length": 5}]
+```
+- `after`: a SOURCE second of the clip, or a mark name (the start of the segment with that mark); `after_end_of`: a mark name (the end of that segment) or `"end"`. A point inside a segment splits it in two; the source frame stands still while the insert plays.
+- `kind`: `auto` (the default, from the extension) | `document` | `text` | `slides` | `image` | `video`. What works: .docx .doc .odt .rtf .pdf (headless LibreOffice with a profile of its own, then `pdftoppm` at 200 dpi, white margins cropped, a smootherstep scroll, pages centred on the dark theme); .md .txt .json .csv (drawn as large light text, headings in the accent colour; `lines: [a, b]` for a range); .pptx .ppt .odp (the deck's `_preview/slide-NN.png` and `contact-sheet.png` when present, otherwise LibreOffice; the overview for 2.5 s, then each slide at full size for 2.2 s with a soft cross-fade; `pages` picks slides); .png .jpg (shown whole, `zoom` to pan); .mp4 .mov (the `start`/`length` part, with its sound, lowered to 0.35 under narration; `composite_clips.py` mixes it in).
+- A label "Opening: <file>" sits at the top left; the top 132 px stay free for it, so scrolled text never runs under the label.
+- An insert is a SEGMENT of its own: with `narration` it opens a new narration group, without it the group before carries on. A longer narration stretches the insert (a slower scroll); a shorter one shrinks it by at most 30% (never under 2 s, a video never). If it still does not fit, `fit` adds `pause_after` on the insert itself. The fast-forward and cut rules for waits never touch it; the report lists the inserts, and their in and out cross-fades are not counted as jumpy scrolls.
+- Small text in a document (a folder tree, a table): add `zoom` on the part being read; `box` is x, y, width on the 1920x1080 frame of the insert, seconds are seconds inside the insert. Pages are cached in `_insert-cache/` next to the config and rebuilt when the file changes (the hash of the rendered clip includes the size and time of every inserted file).
+- Office files and decks without slide images need LibreOffice and Poppler (`pdftoppm`; on Windows `winget install oschwartz10612.Poppler`). LibreOffice starts in the background for a moment, so do not render while a recording is running.

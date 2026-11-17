@@ -159,6 +159,7 @@ def main():
                              f"{len(t['fast'])} fast-forwards (saved {t['fast_saved_s']} s, speeds {', '.join(str(x['speed']) + 'x' for x in t['fast']) or '-'}), "
                              f"held {t['hold_s']} s; {t['zoom']} zoom boxes (max {t['zoom_max']}x, step {t['zoom_step_max_px']} px/frame, jerk {t['zoom_jerk_max_px']} px/frame²); "
                              f"{t['clicks']} clicks, {t['key_labels']} key labels{' (typing hidden)' if t.get('hide_typing') else ''}, {t.get('masks', 0)} masks; "
+                             + (f"{len(t['inserts'])} artifact inserts ({', '.join(x['file'] for x in t['inserts'])}); " if t.get("inserts") else "") +
                              f"fastest action piece {t['action_fastest']}x" + (f"; {n0 - len(real)} jumps inside fast/cut pieces ignored" if n0 != len(real) else ""))
                 if t["action_fastest"] > 1.251:
                     errors.append(f"long take {t['slide']}: an action piece runs at {t['action_fastest']}x > 1.25x")

@@ -68,6 +68,7 @@ Install these once. The skill runs them on your own computer.
 | **Chrome, Chromium or Edge** | renders the frames (headless) | Edge is already there |
 | **git** | to clone | `winget install Git.Git` |
 | **About 3 GB free** | 1.5 GB of Python libraries (torch is most of it), plus the voice model and Whisper | |
+| LibreOffice and Poppler (optional) | only to show a .docx, .pdf or a deck without slide images inside a long take | `winget install TheDocumentFoundation.LibreOffice` and `winget install oschwartz10612.Poppler` |
 
 A GPU is optional: it makes the voice and Whisper faster, a CPU works. The first video downloads the Kokoro voice model and the Whisper model (a few hundred MB), so the first run is slower and needs the internet. Open a new terminal after `winget` so the new PATH is picked up, then check with `python --version`, `node --version` and `ffmpeg -version`. If your default `python` is 3.13 or newer, create the environment below with `py -3.12` (Windows) or `python3.12` instead.
 
@@ -200,15 +201,17 @@ Built on the instructional standard for video learning materials (one topic per 
 - **One focal point per frame.** No spins, flips or flying letters; text never moves while it is being read.
 - **Transitions that mean something**: a zoom-blur for a new part, an iris for a question, varied pushes and wipes elsewhere, never the same twice in a row.
 - **Hand-drawn attention circles**: the answer after a pause question, and any idea the narration stresses ("remember", "never", "the key point"), drawn on and faded.
-- **Sound you feel more than hear**: original synthesised marimba notes, pops and swooshes 19 to 23 dB under the voice, at most 16 a minute, and a piano bed that ducks whenever the voice speaks.
+- **Sound you feel more than hear**: original synthesised marimba notes, pops and swooshes 19 to 23 dB under the voice, at most 16 a minute, and a quiet piano bed (-28 dB) that ducks whenever the voice speaks.
 - **Pauses that agree with the screen**: "pause the video" narration holds briefly (the learner presses pause), other questions get a visible countdown.
 - **Subtitles as separate files** so they never cover the slide text.
 
 ## Real screen recordings
 
-Lessons that teach an action show the real action. `record_screen.py` records one window (even when covered), scrolls it smoothly with small wheel steps, and checks the result. `check_motion.py` measures jumpy scrolling, which a still image never shows; `smooth_scroll.py` replays each jump as a smooth scroll. `composite_clips.py` places the recording inside the slide's frame (or full screen), fades it in over its own first frame, keeps it between 0.8x and 1.25x speed, and `--extend` adds silence when a recording runs longer than its narration.
+Lessons that teach an action show the real action. **Recording from a script is the default**: you (or Claude) write what should happen in an action script, and `record_actions.py` plays it in a Windows Terminal window while it records. It types like a person, presses keys, waits until Claude Code (or any program) is done and answers its prompts, waits for a result file on jobs that take an hour, scrolls through the answer at reading speed, opens the files the job wrote, masks emails, API keys and user paths while they are on screen, and stops by itself. Nobody has to sit at the keyboard, and the take can be repeated exactly. It never types into the wrong window: if the recorded window cannot be brought to the front, or the command it started is not found, it stops instead. `close_recording_windows.py` clears windows left from an earlier take.
 
-For long how-to lessons that are mostly screen recording there is a long-take mode: `record_actions.py` records a terminal session (Claude Code included) from an action script, with an action log, privacy masks and a required result review after every job; `long_take.py` turns the recording into an action table to write the narration from, then cuts or fast-forwards the waits, zooms into the text, highlights clicks and keys and lays each piece of narration on its own piece of picture. See SKILL.md step 2b.
+Recording by hand is the fallback. `record_screen.py` records one window (even when covered), scrolls it smoothly with small wheel steps, and checks the result. `check_motion.py` measures jumpy scrolling, which a still image never shows; `smooth_scroll.py` replays each jump as a smooth scroll. `composite_clips.py` places the recording inside the slide's frame (or full screen), fades it in over its own first frame, keeps it between 0.8x and 1.25x speed, and `--extend` adds silence when a recording runs longer than its narration.
+
+For long how-to lessons that are mostly screen recording there is a long-take mode: `long_take.py` turns the recording into an action table to write the narration from, then cuts or fast-forwards the waits, zooms into the text, highlights clicks and keys and lays each piece of narration on its own piece of picture. After each result it can show the real artifact (the document, the deck, the video the job made), built from the file itself with an "Opening: <file>" label, so learners see the work and not only "Done" in a terminal. See SKILL.md step 2b.
 
 ## Fast re-renders
 
@@ -254,7 +257,7 @@ The renderer has no limit; the standard it follows recommends 5 to 12 minutes pe
 
 ### Can it add screen recordings to slides?
 
-Yes. Record with the included Windows recorder or any tool, smooth the scrolling, and declare the clip on a slide in `video.json`.
+Yes. On Windows, write an action script and let `record_actions.py` record it (the default), or record by hand with the included recorder or any tool; smooth the scrolling and declare the clip on a slide in `video.json`.
 
 ### Is it free?
 
@@ -281,11 +284,14 @@ scripts/check_motion.py               jumpy-scroll detector
 scripts/smooth_scroll.py              smooths jumpy scrolling in a recording
 scripts/record_screen.py              window recorder with smooth scrolling (Windows)
 scripts/record_actions.py             records a terminal session from an action script (Windows)
+scripts/close_recording_windows.py    closes recording windows left from an earlier take, tab by tab (Windows)
 scripts/long_take.py                  long-take mode: action table, cut/fast-forward waits, zoom, click and key highlights
+scripts/insert_artifacts.py           shows the real document, deck, image or video after a result in a long take
 scripts/gpu_lock.py                   one GPU job at a time
 scripts/make_sfx.py, make_music.py    regenerate the original sounds and the piano bed
 assets/engine/                        video.html, video.js (the frame renderer), render.mjs (Chrome + ffmpeg)
 assets/sfx/, assets/music/            the synthesised sound effects and piano bed
+assets/whisper-homophones-en.txt      words Whisper spells differently, accepted in every English voice review
 templates/video.example.json          per-slide overrides
 examples/                             a rendered example lesson
 CHANGELOG.md                          what changed in each release

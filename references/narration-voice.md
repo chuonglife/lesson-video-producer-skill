@@ -27,7 +27,7 @@ Line by line, each line to a WAV, joined with silences into an mp3 plus `timelin
 
 ## 3. Pronunciation fixes (for the voice only, captions keep the real spelling)
 
-`PRONUNCIATION` in `make_voice.py`, one table per engine. It starts empty on purpose: current engines read most product names and loan words correctly, and a respelling can make a good word bad (a test once turned a correctly read English word into nonsense in Vietnamese). Add a pair only after hearing the error and hearing the fix come out right. Typical candidates: unusual names (Kokoro read the Vietnamese name "Chuong" as "Qiwang"; "Chung" fixed it), acronyms you want spelled out, brand names with an unusual stress.
+`PRONUNCIATION` in `make_voice.py`, one table per engine. It is almost empty on purpose (Kokoro has one pair: its own name, read as "Koh-koh-roh"): current engines read most product names and loan words correctly, and a respelling can make a good word bad (a test once turned a correctly read English word into nonsense in Vietnamese). Add a pair only after hearing the error and hearing the fix come out right. Typical candidates: unusual names (Kokoro read the Vietnamese name "Chuong" as "Qiwang"; "Chung" fixed it), acronyms you want spelled out, brand names with an unusual stress.
 
 When a word keeps failing, try two or three spellings, or change the word in `slides.json` (the narration there is the source of truth).
 
@@ -36,6 +36,8 @@ When a word keeps failing, try two or three spellings, or change the word in `sl
 faster-whisper large-v3 (int8_float16 fits a 4 GB GPU) transcribes the mp3 and compares it with `narration.txt`: different words (after normalising numbers, percentages and ranges, so "20%" equals "twenty percent") and, for Vietnamese, **wrong tones** (same letters, different diacritics). Each problem comes with mm:ss so you can listen: `ffmpeg -ss 1:23 -t 4 -i <voice.mp3> clip.wav`.
 
 Filtered automatically and listed at the end of the report: a single short word (4 letters or fewer, not a term or a name) that Whisper heard differently; text Whisper invents over music or silence ("thanks for watching", "subscribe"); anything a second listen (beam 10, primed with the script line) hears correctly. When something is left, `make_video.py` regenerates just those lines (the engines sample, so a second take is usually right) and re-checks just those lines, up to three rounds, instead of listening to the whole lesson again.
+
+In English, the same words spelled two ways are not an error: the review compares a compact form (number words as digits, no spaces or hyphens), so "lesson two" and "lesson 2", "mac os" and "macos" count as equal. Pairs that every English lesson meets (Whisper writes "clawed" or "cloud" for "Claude", "jason" for "JSON") live in `assets/whisper-homophones-en.txt`, one `said>heard` per line, and are loaded for every English review. Add a pair there only after listening; a pair that belongs to one lesson goes in that lesson's exceptions file.
 
 If Whisper misheard (you listened and the voice is right), add the word, or `said>heard`, to `_check/voice-exceptions.txt`. Do not switch to a smaller Whisper model: small models invent whole sentences. `--skip-review` is an emergency exit for pipeline tests only; say so in the report.
 

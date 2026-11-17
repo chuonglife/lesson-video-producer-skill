@@ -1,0 +1,10 @@
+# Words Whisper spells differently although the Kokoro voice says them right, shared by every English lesson.
+# One pair per line, "said>heard", lower case. Add a pair only after listening and hearing it said correctly.
+# Lesson-specific exceptions go in _check/voice-exceptions.txt instead.
+claude>clawed
+claude>cloud
+claude>clod
+claude>clawd
+fourth>forth
+pptx>ppt x
+json>jason

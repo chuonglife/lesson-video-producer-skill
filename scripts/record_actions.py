@@ -23,6 +23,8 @@ The action script (paths are relative to the script file; see templates/actions.
        such as a Vietnamese Telex IME cannot change the text). "secret": true allows a string that looks private;
        otherwise the script is refused
    {"key": "Enter"} | "Esc" | "Ctrl+C" | "Shift+Tab" | "Up" | "1", "repeat": 2
+       after Enter, if the shell answers "is not recognized" (the command is not on the PATH) the recording STOPS;
+       "allow_error": true on the step turns that off
    {"wait_still": 3, "max": 60}                  until the window has not changed for 3 s (at most 60)
    {"wait_text": "Do you want", "max": 30}       until the text shows in the terminal (UI Automation reads the real text, no OCR)
    {"wait_done": {"busy": "esc to interrupt", "still": 3, "max": 600,
@@ -30,6 +32,14 @@ The action script (paths are relative to the script file; see templates/actions.
        until Claude Code (or any program) is done: the busy text appeared and is gone, and the window is still for N s;
        any matching prompt is answered with the given keys (a list for several keys). Without UI Automation it only waits
        for a still window.
+   {"wait_file": {"file": "course/INDEX.md", "max": 21600, "nudge": "Continue", "nudge_every": 900,
+                  "busy": "esc to interrupt", "answer": [{"text": "Do you want", "keys": "Enter"}]}}
+       for very long jobs that run in the background and hand the turn back several times: wait until the file exists
+       (relative to the window's cwd); every nudge_every s, if it is still missing and the busy text is not on screen,
+       type the nudge and Enter; prompts are answered as in wait_done
+   {"if_text": {"text": "All lessons built", "goto_mark": "result"}}
+       if the text is on screen now (case-sensitive), skip every step up to the mark named "result" (for example the job
+       is already done, no need to type "Continue"); the mark must come later in the script
    {"review_result": {"speed": 160, "dwell": 2.5, "files": ["notes.md"], "zoom": [0, 0, 0.6, 0.6]}}
        REQUIRED after every finished job: scroll up to the start of the answer and read down at a readable speed, stop at
        each chunk; open each text file the job wrote in a new tab of the SAME recorded window (Get-Content), scroll through
@@ -41,6 +51,11 @@ Outputs next to the clip: <out>.mp4, <out>.events.jsonl (action log), <out>.take
 zoom), then long_take.py analyse runs -> <out>.longtake.json + the action table.
 Privacy: before and during the recording the visible terminal text is scanned 3 times a second; emails, API keys and
 paths with the Windows user name become timed masks.
+Focus: before every step the recorded window is brought to the front (synthetic Alt, AttachThreadInput,
+SwitchToThisWindow, a click on its own title bar, up to 6 tries); if it still is not in front the script STOPS without
+sending a key. A PowerShell window loads the PATH of this process and the registry, aliases 'claude' to the real
+executable and drops CLAUDE_* before its prompt; after typing 'claude' there, give it about 8 s ({"pause": 8}).
+Close leftover recording windows with close_recording_windows.py before a new take.
 """
 import argparse
 import ctypes
@@ -151,7 +166,20 @@ def frame_rect(hwnd):
     return win32gui.GetWindowRect(hwnd)
 
 
-def to_front(hwnd):
+def to_front(hwnd, tries=6):
+    """Bring the recorded window to the front, or STOP. Another window (a notification, an office suite starting in the
+    background, the taskbar) can hold the focus for a moment: try again, 1.5 s apart, before giving up. Keys are never sent
+    to a window that is not the recorded one."""
+    for k in range(tries):
+        try:
+            return _to_front(hwnd)
+        except SystemExit:
+            if k == tries - 1:
+                raise
+            time.sleep(1.5)
+
+
+def _to_front(hwnd):
     if u.GetForegroundWindow() == hwnd:
         return
     vk(0x12); vk(0x12, True)          # a synthetic Alt lets Windows change the foreground window
@@ -159,6 +187,39 @@ def to_front(hwnd):
         win32gui.SetForegroundWindow(hwnd)
     except Exception:
         pass
+    if u.GetForegroundWindow() != hwnd:
+        # Windows refuses to change the foreground window while another one holds the focus: attach our input thread to
+        # the thread that holds it, then bring the window up
+        k32 = ctypes.windll.kernel32
+        fg = u.GetForegroundWindow()
+        t_fg = u.GetWindowThreadProcessId(fg, None)
+        t_me = k32.GetCurrentThreadId()
+        u.AttachThreadInput(t_me, t_fg, True)
+        try:
+            u.BringWindowToTop(hwnd); u.ShowWindow(hwnd, 5)
+            try:
+                win32gui.SetForegroundWindow(hwnd)
+            except Exception:
+                pass
+            u.SetFocus(hwnd)
+        finally:
+            u.AttachThreadInput(t_me, t_fg, False)
+    time.sleep(0.15)
+    if u.GetForegroundWindow() != hwnd:
+        # when the taskbar holds the focus SetForegroundWindow is blocked; SwitchToThisWindow still works
+        u.SwitchToThisWindow(hwnd, True); time.sleep(0.4)
+    if u.GetForegroundWindow() != hwnd:
+        # last resort: click the title bar of THE RECORDED WINDOW, only if that point really belongs to it (never click another window)
+        L, T, R, _B = frame_rect(hwnd)
+        x, y = int(L + (R - L) * 0.6), int(T + 14)
+        target = u.GetAncestor(u.WindowFromPoint(wintypes.POINT(x, y)), 2)
+        if target == hwnd:
+            pt = wintypes.POINT(); u.GetCursorPos(ctypes.byref(pt))
+            u.SetCursorPos(x, y); time.sleep(0.08)
+            button(True); time.sleep(0.05); button(False); time.sleep(0.4)
+            u.SetCursorPos(pt.x, pt.y)
+    if u.GetForegroundWindow() != hwnd:
+        raise SystemExit("STOPPED: could not bring the recorded window to the front (another window holds the focus). No keys were sent.")
 
 
 class TermText:
@@ -365,10 +426,40 @@ def check_review(script, waived=None):
 def check_private(script):
     errors = []
     for i, b in enumerate(script["steps"], 1):
-        if "type" in b and not b.get("secret"):
-            for kind, s in private_in(b["type"], script.get("private", [])):
+        typed = b.get("type") or ((b.get("wait_file") or {}).get("nudge") if "wait_file" in b else None)
+        if typed and not b.get("secret"):
+            for kind, s in private_in(typed, script.get("private", [])):
                 errors.append(f"step {i}: the typed text contains a {kind} ({s[:3]}...); remove it, or mark the step \"secret\": true if it must be typed")
     return errors
+
+
+def check_jumps(script):
+    """An if_text step must name a mark that comes AFTER it; otherwise every remaining step would be skipped silently."""
+    errors, steps = [], script["steps"]
+    for i, b in enumerate(steps, 1):
+        if "if_text" in b:
+            c = b["if_text"] or {}
+            if not c.get("text") or not c.get("goto_mark"):
+                errors.append(f"step {i}: if_text needs \"text\" and \"goto_mark\"")
+            elif not any(s.get("mark") == c["goto_mark"] for s in steps[i:]):
+                errors.append(f"step {i}: if_text jumps to mark '{c['goto_mark']}', which is not a later step")
+    return errors
+
+
+def check_exit(script):
+    """Warnings (not refusals): typing /exit or exit while Claude Code may still run background work (an install, a render)
+    shows 'Background work is running'; Enter there picks 'Exit and stop tasks' and kills the work. Before /exit, wait a
+    second time for Claude to say it is done (wait_done with a long start_within, or wait_file)."""
+    out, last_wait = [], None
+    for i, b in enumerate(script["steps"], 1):
+        if "wait_done" in b or "wait_file" in b:
+            last_wait = i
+        if "type" in b and b["type"].strip().lower() in ("/exit", "exit", "/quit"):
+            out.append(f"step {i}: types '{b['type'].strip()}'. If the job started background work, Claude Code asks 'Background work is running' "
+                       f"and Enter stops it. Make sure a wait before it (the last one is step {last_wait or 'none'}) lasts until Claude reports "
+                       "the work is done (wait_done with a long start_within, or wait_file). At the end of a script there is no need to exit: "
+                       "the machine stops recording, then closes the window.")
+    return out
 
 
 def find_command(name):
@@ -395,6 +486,21 @@ def open_window(w, base):
     cmd = w.get("command") or ["powershell", "-NoLogo"]
     cmd = list(cmd) if isinstance(cmd, list) else [cmd]
     cmd[0] = find_command(cmd[0])
+    # wt.exe opens the tab in the Windows Terminal process that is ALREADY RUNNING, so the PATH and the environment are
+    # those of the moment Terminal started, not those of this script: typing 'claude' in PowerShell then says "is not
+    # recognized". For a PowerShell window, a small .ps1 runs silently before the prompt (nothing shows on screen): it
+    # loads the PATH of this process plus the registry (Machine + User), points 'claude' at the real executable (the npm
+    # shim claude.ps1/.cmd is not found inside the Terminal session even with the right PATH) and removes CLAUDE_*.
+    if Path(cmd[0]).stem.lower() in ("powershell", "pwsh") and not any(x.lower() in ("-command", "-c", "-file", "-f") for x in cmd[1:]):
+        loader = Path(os.environ.get("TEMP", str(base))) / "record_actions_env.ps1"
+        path = os.environ.get("PATH", "").replace("'", "''")
+        claude = find_command("claude")
+        loader.write_text(f"$env:Path = '{path}' + ';' + [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + "
+                          "[Environment]::GetEnvironmentVariable('Path','User')\n"
+                          + (f"Set-Alias -Name claude -Value '{claude.replace(chr(39), chr(39) * 2)}' -Scope Global\n" if Path(claude).is_absolute() else "")
+                          + "Get-ChildItem env: | Where-Object { $_.Name -like 'CLAUDE*' } | ForEach-Object { Remove-Item \"env:$($_.Name)\" }\n"
+                          "Clear-Host\n", encoding="utf-8-sig")   # a BOM, so Windows PowerShell 5.1 reads non-ASCII paths right
+        cmd = cmd + ["-NoExit", "-ExecutionPolicy", "Bypass", "-File", str(loader)]
     if any(";" in x for x in cmd):
         raise SystemExit("the window command contains ';': wt.exe splits commands at ';'. Put a long command in a .ps1/.cmd file and call that.")
     # a clean environment: the CLAUDE_* variables of the controlling session would leak into claude in the recorded window
@@ -436,6 +542,11 @@ def main():
     if errors:
         raise SystemExit("SCRIPT REFUSED (missing result review: scroll through the whole answer, open the files the job wrote):\n"
                          + "\n".join(errors) + '\nAdd {"review_result": {...}} after the wait_done step; to waive it use --skip-review "<reason>".')
+    errors = check_jumps(script)
+    if errors:
+        raise SystemExit("SCRIPT REFUSED (if_text):\n" + "\n".join(errors))
+    for w in check_exit(script):
+        print("WARNING:", w)
     waived = a.skip_review or script.get("skip_review")
     if waived:
         print("review_result rule WAIVED, reason:", waived)
@@ -470,7 +581,20 @@ def main():
         time.sleep(1.2)
     marks, reading, warnings = [], [], []
     t_start = time.time()
+    skip_to = None    # set by if_text: skip every step up to the named mark
     for i, b in enumerate(script["steps"], 1):
+        if skip_to is not None:
+            if b.get("mark") == skip_to:
+                skip_to = None
+            else:
+                continue
+        if "if_text" in b:
+            c = b["if_text"]
+            # case-sensitive on purpose: the same words in the prompt typed earlier must not trigger the jump
+            if tt.ok and c["text"] in tt.read():
+                print(f"[{time.time() - t_start:6.1f}s] step {i}: saw '{c['text']}' -> jump to mark '{c['goto_mark']}'")
+                skip_to = c["goto_mark"]
+            continue
         to_front(hwnd)
         shown = json.dumps(b, ensure_ascii=False) if "type" not in b or not hide else json.dumps({**b, "type": f"<{len(b['type'])} characters>"})
         print(f"[{time.time() - t_start:6.1f}s] step {i}: {shown[:110]}")
@@ -479,8 +603,22 @@ def main():
         elif "type" in b:
             type_text(b["type"], b.get("pace", [0.025, 0.04]))
         elif "key" in b:
+            before = tt.read().count("is not recognized as") if tt.ok else 0
             for _ in range(int(b.get("repeat", 1))):
                 press(b["key"]); time.sleep(0.12)
+            # a command that does not run (for example 'claude' not on the PATH): STOP NOW, do not type the prompt into the shell
+            if tt.ok and b["key"].lower() == "enter" and not b.get("allow_error"):
+                time.sleep(1.5)
+                if tt.read().count("is not recognized as") > before:
+                    print("  visible text (end):", " | ".join(l.strip() for l in tt.read().splitlines() if l.strip())[-600:])
+                    if rec:
+                        Path(str(out) + ".stop").write_text("x")
+                        try:
+                            rec.wait(20)
+                        except subprocess.TimeoutExpired:
+                            pass
+                    win32gui.PostMessage(hwnd, 0x10, 0, 0)
+                    raise SystemExit(f"STOPPED at step {i}: the shell says 'is not recognized' (the command is not on the PATH). Recording stopped.")
         elif "wait_still" in b:
             wait_still(hwnd, float(b["wait_still"]), float(b.get("max", 60)), float(b.get("threshold", 0.002)))
         elif "wait_text" in b:
@@ -517,6 +655,25 @@ def main():
                 return not (busy and busy in txt)
             wait_still(hwnd, float(c.get("still", 3)), float(c.get("max", 600)), float(c.get("threshold", 0.002)), done if tt.ok else None)
             print(f"  done after {time.time() - t0:.0f} s")
+        elif "wait_file" in b:
+            # very long jobs: Claude Code works in the background and hands the turn back several times, so the screen says
+            # "done" long before the job is. Wait for the RESULT FILE instead. Every nudge_every seconds, if the file is still
+            # missing AND the screen is not busy, type the nudge (for example "Continue") and Enter.
+            c = b["wait_file"]; f = Path(c["file"]); f = f if f.is_absolute() else Path(win["cwd"]) / f
+            t0, last_nudge, busy = time.time(), time.time(), (c.get("busy") or "esc to interrupt").lower()
+            while not f.exists() and time.time() - t0 < float(c.get("max", 21600)):
+                time.sleep(5)
+                txt = tt.read() if tt.ok else ""
+                for r in c.get("answer", []):
+                    if r["text"].lower() in txt.lower():
+                        print(f"  saw '{r['text']}' -> {r['keys']}"); to_front(hwnd)
+                        for k in (r["keys"] if isinstance(r["keys"], list) else [r["keys"]]):
+                            press(k); time.sleep(0.25)
+                if c.get("nudge") and time.time() - last_nudge > float(c.get("nudge_every", 900)) and busy not in txt.lower():
+                    print(f"  [{time.time() - t_start:6.1f}s] {f.name} not there yet and the screen is idle: nudging")
+                    to_front(hwnd); type_text(c["nudge"], [0.008, 0.016]); time.sleep(0.5); press("Enter")
+                    last_nudge = time.time()
+            print(f"  {'found' if f.exists() else 'TIME IS UP, still no'} {f.name} after {time.time() - t0:.0f} s")
         elif "scroll" in b:
             p = point(hwnd, b.get("at", [0.5, 0.5])); u.SetCursorPos(int(p[0]), int(p[1]))
             n = max(1, int(float(b.get("seconds", 2)) * 60)); step = int(round(-float(b["scroll"]) / n * 1.2))

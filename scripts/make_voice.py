@@ -48,7 +48,7 @@ GAP_COMMA = 0.14
 # engine get the word wrong AND heard the new spelling come out right. Keep it short: modern engines read most loan
 # words and product names well, and a "phonetic" respelling can make things worse.
 PRONUNCIATION = {
-    "kokoro": {},
+    "kokoro": {"Kokoro": "Koh-koh-roh"},     # the voice read its own name wrong; this spelling was heard to come out right
     "vieneu": {},
     "edge": {},
 }

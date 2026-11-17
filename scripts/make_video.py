@@ -5,7 +5,7 @@ MAKE THE LESSON VIDEO with ONE COMMAND from an existing deck (slides/<course>/<l
 
 Usage:
   python make_video.py <slides.json> [--lang en|vi|...] [--engine kokoro|vieneu|edge|files] [--voice NAME or folder]
-                       [--no-music] [--music-db -22] [--no-sfx] [--extend] [--skip-review]
+                       [--no-music] [--music-db -28] [--no-sfx] [--extend] [--skip-review]
                        [--from-step N] [--workers 2] [--crf 18] [--full-render]
 
 Steps (everything is written to videos/<course>/<lesson>/):
@@ -61,7 +61,7 @@ def main():
     ap.add_argument("--engine", choices=["kokoro", "vieneu", "edge", "files"])
     ap.add_argument("--voice")
     ap.add_argument("--no-music", action="store_true")
-    ap.add_argument("--music-db", type=float, default=-22)
+    ap.add_argument("--music-db", type=float, default=-28)  # -22 sounded loud under the voice
     ap.add_argument("--no-sfx", action="store_true")
     ap.add_argument("--extend", action="store_true")
     ap.add_argument("--skip-review", action="store_true")

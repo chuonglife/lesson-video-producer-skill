@@ -15,7 +15,9 @@ Filtered automatically (listed at the end of the report): Whisper mishearing a s
 fewer, not a term or a name); text Whisper invents over music or silence outside every narration line ("thanks for
 watching", "subscribe"); places where a second listen (beam 10, primed with the line) hears the script correctly.
 It only stops on long words, terms, names or several words in a row. Exit code 3 when anything is left (1 = the review itself failed).
-Numbers written as words in the script and digits in the transcript are treated as equal.
+Numbers written as words in the script and digits in the transcript are treated as equal. In English, the same words
+spelled two ways ("lesson two" / "lesson 2", "mac os" / "macos") are equal too, and the pairs in
+assets/whisper-homophones-en.txt (shared by every lesson, "said>heard", for example "claude>clawed") are exceptions.
 """
 import argparse
 import difflib
@@ -125,6 +127,26 @@ def norm(t, lang, keep_marks=False):
     return [northern(w) for w in words] if lang == "vi" else words
 
 
+EN_DIGIT = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+            "seven": "7", "eight": "8", "nine": "9", "ten": "10"}
+
+
+def compact_en(t):
+    """A compact form to compare two spellings of the same English words: number words as digits, no spaces or hyphens
+    ('b02 one' and 'b021', 'mac os' and 'macos', 'lesson two' and 'lesson 2' are the same thing said)."""
+    return "".join(EN_DIGIT.get(x, x) for x in re.findall(r"[a-z0-9]+", (t or "").lower()))
+
+
+SHARED_HOMOPHONES = Path(__file__).resolve().parent.parent / "assets" / "whisper-homophones-en.txt"
+
+
+def load_shared(lang):
+    """Pairs every English lesson shares ("said>heard": Whisper spells them differently, the voice says them right)."""
+    if lang != "en" or not SHARED_HOMOPHONES.is_file():
+        return set()
+    return {l.strip().lower() for l in SHARED_HOMOPHONES.read_text(encoding="utf-8").splitlines() if l.strip() and not l.lstrip().startswith("#")}
+
+
 def mmss(s):
     return f"{int(s // 60)}:{s % 60:04.1f}"
 
@@ -176,7 +198,8 @@ def main():
     exceptions = set()
     if a.exceptions and Path(a.exceptions).is_file():
         exceptions = {l.strip().lower() for l in Path(a.exceptions).read_text(encoding="utf-8").splitlines() if l.strip()}
-    tl = json.loads(Path(a.timeline).read_text(encoding="utf-8"))["lines"] if a.timeline else []
+    exceptions |= load_shared(lang)
+    tl =json.loads(Path(a.timeline).read_text(encoding="utf-8"))["lines"] if a.timeline else []
     tl = [l for l in tl if l.get("text")]
     raw = Path(a.narration).read_text(encoding="utf-8")
     script = re.sub(r"\|\s*\d+(?:[.,]\d+)?\s*$", " ", raw, flags=re.M)
@@ -245,7 +268,7 @@ def main():
         n_ref, n_heard = len(ref), len(heard[0])
 
     problems, report, bad_times, filtered = 0, [], [], []
-    count = {"exception": 0, "second listen": 0, "short word": 0, "outside narration": 0, "invented": 0}
+    count = {"exception": 0, "same words": 0, "second listen": 0, "short word": 0, "outside narration": 0, "invented": 0}
     for t, tag, g, n in diffs:
         if tag == "tone":
             if g in exceptions or f"{g}>{n}" in exceptions:
@@ -258,6 +281,8 @@ def main():
             continue
         if g.lower() in exceptions or (g and any(g == x or x in g for x in exceptions)) or f"{g}>{n}" in exceptions:
             count["exception"] += 1; continue
+        if lang == "en" and tag == "replace" and compact_en(g) == compact_en(n):
+            count["same words"] += 1; continue   # the same words spelled two ways, not a misreading
         if tag == "replace" and len(g) <= 2 and len(n) <= 2:
             continue
         if tag == "insert" and n.strip() in ("percent", "phan cham", "phần trăm"):

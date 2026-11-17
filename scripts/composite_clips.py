@@ -18,7 +18,8 @@ In video.json, the "clip" of a slide:
             learners cannot follow a sped-up demo.
   A clip shorter than the slide holds its last frame. A clip longer than the slide is cut, with a WARNING: add "hold"
   to that slide or run make_video.py --extend, which adds the hold for you.
-The base video's audio (voice, effects, music) is kept; the clip's own audio is dropped.
+The base video's audio (voice, effects, music) is kept; the clip's own audio is dropped. The one exception is a video
+inserted into a long take (long_take.py "inserts"): its sound is mixed in, lowered to 0.35 under narration.
 Run check_motion.py on every clip first (and smooth_scroll.py if it finds jumps).
 """
 import json
@@ -74,7 +75,7 @@ def main():
         subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", base, "-c", "copy", out], check=True)
         return
     inputs, chains, last, errors = ["-i", base], [], "[0:v]", []
-    long_takes = []
+    long_takes, insert_audio = [], []    # insert_audio: the sound of video inserts in long takes, mixed under the narration
     for k, (sid, c) in enumerate(clips):
         i = next(j for j, s in enumerate(slides) if s["id"] == sid)
         t_in = (0 if i == 0 else starts[slides[i]["from_line"] - 1]) + DELAY
@@ -91,6 +92,7 @@ def main():
             f, m = render_for_slide(slides[i], c, root, starts, t_in, t_out)
             m = dict(m, slide=sid, t_in=round(t_in, 3), skip_jumps=[[a + t_in, b + t_in] for a, b in m.get("skip_jumps", [])])
             long_takes.append(m)
+            insert_audio += [dict(x, out_from=x["out_from"] + t_in) for x in m.get("insert_audio", [])]
             c = {**c, "start": 0, "length": None, "speed": 1.0, "mode": c.get("mode", "full")}
         ss = float(c.get("start", 0))
         length = float(c.get("length") or max(0.1, duration(f) - ss))
@@ -120,8 +122,21 @@ def main():
         lt.write_text(json.dumps({"video": Path(out).name, "takes": long_takes}, ensure_ascii=False, indent=1), encoding="utf-8")
     elif lt.is_file():
         lt.unlink()
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(chains), "-map", last, "-map", "0:a?",
-                    "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", out], check=True)
+    amap, acodec = ["-map", "0:a?"], ["-c:a", "copy"]
+    if insert_audio:
+        mixed = []
+        for j, x in enumerate(insert_audio):
+            idx = inputs.count("-i"); inputs += ["-i", x["file"]]
+            ms = int(round(x["out_from"] * 1000))
+            chains.append(f"[{idx}:a]atrim=start={x['start']}:duration={x['length']},asetpts=PTS-STARTPTS,aresample=48000,"
+                          f"aformat=channel_layouts=stereo,volume={x['volume']},adelay={ms}|{ms}[ax{j}]")
+            mixed.append(f"[ax{j}]")
+        # the base audio needs its own label before amix: "[0:a]aformat=...[ax0]amix" is a filtergraph syntax error
+        chains.append(f"[0:a]aformat=channel_layouts=stereo[a0];[a0]{''.join(mixed)}amix=inputs={len(mixed) + 1}:normalize=0:duration=first[amix]")
+        amap, acodec = ["-map", "[amix]"], ["-c:a", "aac", "-b:a", "192k"]
+        print(f"mixing the sound of {len(insert_audio)} video inserts")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(chains), "-map", last, *amap,
+                    "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", *acodec, "-movflags", "+faststart", out], check=True)
     print("wrote", out)
 
 

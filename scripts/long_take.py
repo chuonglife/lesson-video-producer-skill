@@ -33,6 +33,9 @@ The config <clip>.longtake.json (seconds are seconds of the ORIGINAL clip, read 
           in, out and the pan between two neighbouring boxes follow a slow-fast-slow curve over "ease" seconds of output
   "masks": [{"from": 0, "to": 12, "box": [x, y, w, h], "kind": "solid" | "blur"}]   privacy masks (record_actions.py writes them)
   "highlight": {"clicks": true, "keys": true, "hide_typing": true}   hide_typing: never show typed text, only key combos
+  "inserts": [{"after": 72.6, "file": "D:/demo-course/program.docx", "pages": [1, 2], "narration": "..."}]
+          the REAL ARTIFACT shown right after a result: a document, text file, deck, image or video built from the file
+          itself (no extra recording), with an "Opening: <file>" label; see insert_artifacts.py for every field
 Fitting narration and picture, group by group: narration longer than the picture -> the fast-forward slows down (never
 below min_speed) and then the last frame holds; narration shorter -> waits shrink (fast-forward up to max_speed, a cut down
 to 0.8 s), then action pieces speed up by at most 1.25x; still too long -> "fit" adds pause_after so the picture can run.
@@ -104,6 +107,10 @@ def read_config(p):
     cfg["highlight"] = {**HIGHLIGHT_DEFAULTS, **(cfg.get("highlight") or {})}
     cfg.setdefault("waits", []); cfg.setdefault("zoom", []); cfg.setdefault("masks", [])
     cfg["segments"] = sorted(cfg.get("segments") or [], key=lambda d: d["from"])
+    cfg["_dir"] = str(Path(p).resolve().parent)
+    sys.path.insert(0, str(HERE))
+    import insert_artifacts
+    insert_artifacts.expand(cfg)     # inserts of the real artifacts (if any) become segments of their own
     return cfg
 
 
@@ -139,6 +146,10 @@ def pieces_of_segment(cfg, d):
     wd = cfg["wait_defaults"]
     a, b = d["from"], d["to"]
     out, cur = [], a
+    if d.get("insert") is not None:     # an insert of the real artifact: the source frame stands still, the picture is the file
+        import insert_artifacts
+        r = insert_artifacts.prepare(d["insert"], cfg["_dir"], cfg.get("language") or "en")
+        return [{"kind": "insert", "s0": a, "s1": a, "r": r, "item": d["insert"]}]
     if d.get("reading"):      # a reading segment: actions only (the 1.25x rule), any wait written over it is ignored
         return [{"kind": "act", "s0": a, "s1": b}]
     for w in sorted(cfg["waits"], key=lambda w: w["from"]):
@@ -165,6 +176,9 @@ def fit_group(pieces, D, wd):
         L = m["s1"] - m["s0"]
         if m["kind"] == "act":
             m["pref"], m["lo"], m["hi"] = L, L * ACTION_FASTEST, L
+        elif m["kind"] == "insert":     # shrinks to 70% (never under 2 s); a video insert never shrinks
+            g = m["r"].seconds
+            m["pref"], m["lo"], m["hi"] = g, (g if m["r"].fixed else max(min(2.0, g), g * 0.7)), g
         elif m["mode"] == "cut":
             m["pref"], m["lo"], m["hi"] = float(wd["cut_seconds"]), CUT_MIN, CUT_MAX
         else:
@@ -185,7 +199,7 @@ def fit_group(pieces, D, wd):
         hold = extra - used
     else:
         need = P - D
-        for pool in (waits, [m for m in pieces if m["kind"] == "act"]):
+        for pool in (waits, [m for m in pieces if m["kind"] == "act"], [m for m in pieces if m["kind"] == "insert"]):
             room = sum(m["out"] - m["lo"] for m in pool)
             used = min(need, room)
             for m in pool:
@@ -206,6 +220,9 @@ def schedule(cfg, group_seconds=None):
         D = group_seconds[k] if group_seconds and k < len(group_seconds) else None
         pieces, hold, short = fit_group(pieces, D, wd)
         o_group = o
+        if hold > 1e-3 and any(m["kind"] == "insert" for m in pieces):   # a group with an insert stretches the insert (slower scroll)
+            [m for m in pieces if m["kind"] == "insert"][-1]["out"] += hold   # instead of holding the source frame
+            hold = 0.0
         for m in pieces:
             m["o0"], m["o1"] = o, o + m["out"]; o = m["o1"]; m["group"] = k; plan.append(m)
         if hold > 1e-3:
@@ -699,6 +716,15 @@ def render(clip, cfg_p, out_path, group_seconds=None):
         else:
             out = cv2.warpAffine(f, M, (OUT_W, OUT_H), flags=cv2.INTER_CUBIC if k0 * sc > 1.02 else cv2.INTER_LINEAR,
                                  borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0))
+        if m["kind"] == "insert":
+            # the real artifact, cross-faded in and out over 0.35 s, with the "Opening: <file>" label at the top left
+            tl, dr = t - m["o0"], m["o1"] - m["o0"]
+            al = min(1.0, tl / 0.35, (m["o1"] - t) / 0.35)
+            cf = m["r"].frame(tl, dr)
+            paste(cf, label_image(m["r"].label, 34), 48, 48, min(1.0, tl / 0.5))
+            out = cf if al >= 0.999 else cv2.addWeighted(cf, max(0.0, al), out, 1 - max(0.0, al), 0)
+            enc.stdin.write(out.tobytes())
+            continue
         for o, x, y in clicks:
             if 0 <= t - o < 0.6:
                 click_ripple(out, (x - zx) * sc, (y - zy) * sc, (t - o) / 0.6)
@@ -719,6 +745,15 @@ def render(clip, cfg_p, out_path, group_seconds=None):
     cuts = [m for m in plan if m["kind"] == "wait" and m["mode"] == "cut"]
     fasts = [m for m in plan if m["kind"] == "wait" and m["mode"] != "cut"]
     acts = [m for m in plan if m["kind"] == "act"]
+    inserts = [m for m in plan if m["kind"] == "insert"]
+    groups = narration_groups(cfg)
+    insert_audio = []
+    for m in inserts:
+        if m["r"].audio:
+            au = dict(m["r"].audio)
+            if au.get("volume") is None:
+                au["volume"] = 0.35 if groups[m["group"]]["lines"] else 1.0
+            insert_audio.append({**au, "out_from": round(m["o0"], 3), "out_to": round(m["o1"], 3)})
     metrics = {"clip": clip.name, "source_s": round(length, 2), "out_s": round(n_frames / FPS, 2),
                "cuts": len(cuts), "cut_s": round(sum(m["s1"] - m["s0"] - (m["o1"] - m["o0"]) for m in cuts), 1),
                "fast": [{"out_from": round(m["o0"], 2), "out_to": round(m["o1"], 2), "source_s": round(m["s1"] - m["s0"], 1),
@@ -730,11 +765,16 @@ def render(clip, cfg_p, out_path, group_seconds=None):
                "clicks": len(clicks), "key_labels": len(keys), "hide_typing": bool(hl["hide_typing"]), "masks": len(masks),
                "groups": report,
                "skip_jumps": [[round(m["o0"] - 0.2, 2), round(m["o1"] + 0.2, 2)] for m in cuts + fasts]}
+    if inserts:      # only when there are inserts, so a long take without them writes the same metrics as before
+        metrics["inserts"] = [{"out_from": round(m["o0"], 2), "out_to": round(m["o1"], 2), "file": m["r"].file.name, "kind": m["r"].kind} for m in inserts]
+        metrics["insert_audio"] = insert_audio
+        metrics["skip_jumps"] += [r for m in inserts for r in ([round(m["o0"] - 0.2, 2), round(m["o0"] + 0.6, 2)],
+                                                               [round(m["o1"] - 0.6, 2), round(m["o1"] + 0.2, 2)])]
     Path(str(out_path) + ".metrics.json").write_text(json.dumps(metrics, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"rendered {out_path.name}: source {length:.1f} s -> {metrics['out_s']:.1f} s; {metrics['cuts']} cuts ({metrics['cut_s']} s), "
           f"{len(fasts)} fast-forwards (saved {metrics['fast_saved_s']} s), held {metrics['hold_s']} s, {len(zooms)} zoom boxes "
           f"(max {zoom_max:.2f}x, step {step_max:.1f} px/frame, jerk {jerk_max:.1f} px/frame²), {len(clicks)} clicks, {len(keys)} key labels, "
-          f"{len(masks)} masks; fastest action piece {metrics['action_fastest']}x")
+          f"{len(masks)} masks, {len(inserts)} artifact inserts; fastest action piece {metrics['action_fastest']}x")
     for b in report:
         if b["short"] > 0.05:
             print(f"WARNING group {b['group']}: the picture is still {b['short']} s longer than the narration at full squeeze; "
@@ -762,7 +802,8 @@ def render_for_slide(sl, c, root, starts, t_in, t_out):
     ev_p = clip.parent / cfg["events"] if cfg.get("events") else None
     h = hashlib.md5()
     for x in (json.dumps(cfg, sort_keys=True, ensure_ascii=False), ",".join(f"{d:.3f}" for d in D), f"{clip.stat().st_size}:{clip.stat().st_mtime_ns}",
-              ev_p.read_text(encoding="utf-8") if ev_p and ev_p.is_file() else "", Path(__file__).read_text(encoding="utf-8")):
+              ev_p.read_text(encoding="utf-8") if ev_p and ev_p.is_file() else "", __import__("insert_artifacts").fingerprint(cfg),
+              Path(__file__).read_text(encoding="utf-8")):
         h.update(x.encode("utf-8"))
     out = clip.parent / "_longtake" / f"{clip.stem}-{h.hexdigest()[:10]}.mp4"
     mp = Path(str(out) + ".metrics.json")
@@ -798,7 +839,8 @@ def fit(board_p, tl_p, ov_p):
             print(f"{sl['id']} group {b['group']} (segments {b['segments']}): narration {b['D']} s, picture {b['video']} s, held {b['hold']} s"
                   + (f", SHORT {b['short']} s" if b["short"] > 0.05 else ""))
             if b["short"] > 0.05:
-                d0 = raw["segments"][g["segments"][0]]
+                e0 = cfg["segments"][g["segments"][0]]       # expanded segments: map back to the file (an insert or a source segment)
+                d0 = raw["inserts"][e0["_insert"]] if "_insert" in e0 else raw["segments"][e0["_orig"]]
                 d0["pause_after"] = round(float(d0.get("pause_after") or 0) + math.ceil((b["short"] + 0.1) * 10) / 10, 1)
                 print(f"  -> pause_after = {d0['pause_after']} s on segment {g['segments'][0] + 1}")
                 changed = True

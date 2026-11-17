@@ -5,7 +5,7 @@ Mix the THREE-LAYER SOUNDTRACK of a lesson: narration + sound effects locked to 
 that ducks under the voice.
 
 Usage:
-  python mix_audio.py <voice.mp3> <events.json> <out.mp3> [--music <file>] [--no-music] [--no-sfx] [--music-db -22]
+  python mix_audio.py <voice.mp3> <events.json> <out.mp3> [--music <file>] [--no-music] [--no-sfx] [--music-db -28]
 
 events.json comes from `render.mjs plan` (events: [{t, sound, what}], duration). Sounds: assets/sfx/*.wav, original
 sounds synthesised by scripts/make_sfx.py (no third-party rights). Music: assets/music/piano-bed.mp3, synthesised by
@@ -72,7 +72,7 @@ def main():
     ap.add_argument("--music", default=str(ASSETS / "music" / "piano-bed.mp3"))
     ap.add_argument("--no-music", action="store_true")
     ap.add_argument("--no-sfx", action="store_true")
-    ap.add_argument("--music-db", type=float, default=-22)
+    ap.add_argument("--music-db", type=float, default=-28)  # -22 sounded loud under the voice
     a = ap.parse_args()
     plan = json.loads(Path(a.events).read_text(encoding="utf-8"))
     dur = float(plan["duration"])
