@@ -56,6 +56,8 @@ def frame_of(slide, c):
 
 
 def main():
+    if len(sys.argv) < 6 and not (len(sys.argv) > 1 and sys.argv[1] == "--first-frame"):
+        print(__doc__); sys.exit(0 if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help") else 2)
     if len(sys.argv) > 1 and sys.argv[1] == "--first-frame":
         first_frame(*sys.argv[2:5]); return
     board_p, tl_p, ov_p, base, out = sys.argv[1:6]

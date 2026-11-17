@@ -56,25 +56,102 @@ One folder per lesson:
 
 ## Install
 
-**Claude Code (personal, all projects)**
+### Before you start
+
+Install these once. The skill runs them on your own computer.
+
+| What | Why | Windows (PowerShell) |
+|---|---|---|
+| **Python 3.10, 3.11 or 3.12** | all scripts. Kokoro does not install on 3.13 or newer (`kokoro` declares `<3.13`), so pick 3.12 | `winget install Python.Python.3.12` |
+| **Node.js 18 or newer**, with npm | the frame renderer | `winget install OpenJS.NodeJS.LTS` |
+| **ffmpeg and ffprobe** on your PATH | audio, video, checks | `winget install Gyan.FFmpeg` |
+| **Chrome, Chromium or Edge** | renders the frames (headless) | Edge is already there |
+| **git** | to clone | `winget install Git.Git` |
+| **About 3 GB free** | 1.5 GB of Python libraries (torch is most of it), plus the voice model and Whisper | |
+
+A GPU is optional: it makes the voice and Whisper faster, a CPU works. The first video downloads the Kokoro voice model and the Whisper model (a few hundred MB), so the first run is slower and needs the internet. Open a new terminal after `winget` so the new PATH is picked up, then check with `python --version`, `node --version` and `ffmpeg -version`. If your default `python` is 3.13 or newer, create the environment below with `py -3.12` (Windows) or `python3.12` instead.
+
+**Plan for about 25 minutes.** Measured on a Windows 11 laptop: `requirements.txt` took 318 s, `kokoro soundfile` 915 s (it pulls torch, and pip stays silent for minutes while it downloads; it has not hung), `npm install` 37 s. The virtual environment ends up at 1.5 GB.
+
+### Claude Code, one project only (recommended)
+
+The skill sits in your course project and its Python libraries go into a `.venv` in the same project, so nothing touches the rest of your machine. Run these from the project folder.
+
+macOS or Linux (bash):
+
+```bash
+git clone https://github.com/chuonglife/lesson-video-producer-skill .claude/skills/lesson-video-producer
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r .claude/skills/lesson-video-producer/requirements.txt
+.venv/bin/python -m pip install kokoro soundfile      # the English voice; slow, see above
+npm install --prefix .claude/skills/lesson-video-producer/assets/engine   # the frame renderer (puppeteer-core)
+```
+
+Windows (PowerShell):
+
+```powershell
+git clone https://github.com/chuonglife/lesson-video-producer-skill .claude\skills\lesson-video-producer
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r .claude\skills\lesson-video-producer\requirements.txt
+.\.venv\Scripts\python.exe -m pip install kokoro soundfile
+npm install --prefix .claude\skills\lesson-video-producer\assets\engine
+```
+
+On Windows, `requirements.txt` also installs `pywin32`, which the window recorder `record_screen.py` needs. Claude uses the project's `.venv` on its own (the skill tells it to); you do not have to activate it.
+
+### Claude Code, personal (all projects)
+
+macOS or Linux (bash):
 
 ```bash
 git clone https://github.com/chuonglife/lesson-video-producer-skill ~/.claude/skills/lesson-video-producer
 cd ~/.claude/skills/lesson-video-producer
-pip install -r requirements.txt
-pip install kokoro soundfile          # the English voice (or install it in its own environment, see below)
-cd assets/engine && npm install       # the frame renderer (puppeteer-core)
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install kokoro soundfile
+cd assets/engine
+npm install
 ```
 
-**Claude Code (one project only)**: clone into `.claude/skills/lesson-video-producer` instead and run the same installs.
+Windows (PowerShell):
 
-**Claude desktop app**: download `lesson-video-producer.skill` from the [latest release](https://github.com/chuonglife/lesson-video-producer-skill/releases/latest), add it under Settings, Capabilities, Skills, and install the requirements above on the same machine (the skill runs local programs).
+```powershell
+git clone https://github.com/chuonglife/lesson-video-producer-skill "$HOME\.claude\skills\lesson-video-producer"
+py -3.12 -m venv "$HOME\.claude\skills\lesson-video-producer\.venv"
+& "$HOME\.claude\skills\lesson-video-producer\.venv\Scripts\python.exe" -m pip install -r "$HOME\.claude\skills\lesson-video-producer\requirements.txt"
+& "$HOME\.claude\skills\lesson-video-producer\.venv\Scripts\python.exe" -m pip install kokoro soundfile
+npm install --prefix "$HOME\.claude\skills\lesson-video-producer\assets\engine"
+```
 
-**Requirements**: Python 3.10+, Node.js 18+, `ffmpeg` and `ffprobe`, and Chrome, Chromium or Edge (set `CHROME_PATH` if it is not found). A GPU makes the voice and Whisper faster but is not required. Windows, macOS and Linux; the window recorder `record_screen.py` is Windows-only (use OBS or ffmpeg elsewhere). If the voice engine lives in its own virtual environment, point the skill at it:
+Here the environment lives inside the skill folder, so tell Claude once which Python to use, for example "run the video scripts with `~/.claude/skills/lesson-video-producer/.venv` Python", or put that line in your project's `CLAUDE.md`.
+
+### Claude desktop app
+
+Download `lesson-video-producer.skill` from the [latest release](https://github.com/chuonglife/lesson-video-producer-skill/releases/latest) and add it under Settings, Capabilities, Skills. The skill runs local programs, so install the software above on the same machine and run `npm install` in its `assets/engine` folder (the package does not ship `node_modules`).
+
+### Voice engine in its own environment
+
+If Kokoro or VieNeu lives in a separate virtual environment, point the skill at that Python. bash:
 
 ```bash
 export KOKORO_PYTHON=/path/to/kokoro-env/bin/python
 ```
+
+PowerShell:
+
+```powershell
+$env:KOKORO_PYTHON = "C:\path\to\kokoro-env\Scripts\python.exe"
+```
+
+Set `CHROME_PATH` the same way if Chrome, Chromium or Edge is not found. The skill runs on Windows, macOS and Linux; only the window recorder `record_screen.py` is Windows-only (use OBS or ffmpeg elsewhere).
+
+### Check the install
+
+```bash
+.venv/bin/python .claude/skills/lesson-video-producer/scripts/make_video.py --help
+```
+
+On Windows: `.\.venv\Scripts\python.exe .claude\skills\lesson-video-producer\scripts\make_video.py --help`. It should print the options without an error.
 
 The slides come from [Lesson Slide Designer](https://github.com/chuonglife/lesson-slide-designer-skill): `slides.json`, the `.pptx` and the `_preview/slide-NN.png` images.
 
@@ -207,6 +284,7 @@ assets/engine/                        video.html, video.js (the frame renderer),
 assets/sfx/, assets/music/            the synthesised sound effects and piano bed
 templates/video.example.json          per-slide overrides
 examples/                             a rendered example lesson
+CHANGELOG.md                          what changed in each release
 ```
 
 ## Sources and credits

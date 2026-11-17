@@ -1,9 +1,10 @@
+# Python 3.10, 3.11 or 3.12 (Kokoro does not install on 3.13+). Install into a virtual environment (.venv).
 python-pptx>=0.6.21
 numpy>=1.24
 Pillow>=9.0
 opencv-python>=4.8      # smooth_scroll.py (screen recordings)
 faster-whisper>=1.0     # review_voice.py (Whisper check of the narration)
+pywin32>=306; sys_platform == "win32"   # record_screen.py (Windows window recorder)
 # Voice engines (install in this environment or in their own, then set KOKORO_PYTHON / VIENEU_PYTHON):
-#   kokoro>=0.9  soundfile    -> English and 8 other languages (Python 3.10-3.12)
+#   kokoro>=0.9  soundfile    -> English and 8 other languages (Python 3.10-3.12; pulls torch, about 1 GB)
 #   VieNeu-TTS                -> Vietnamese, see its repository
-# Windows only, for record_screen.py: pywin32

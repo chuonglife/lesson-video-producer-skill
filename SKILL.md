@@ -23,7 +23,9 @@ Output in `videos/<course>/<lesson>/` (mirrors the slides path; otherwise `<slid
 | `_check/` | `contact-NN.png` (frames of the finished video), `<file_name>.report.md` (measurements), `voice-review.txt` (Whisper), `voice-exceptions.txt` |
 | `_segments/` | One rendered segment per slide, reused when that slide has not changed |
 
-Tools: Python 3.10+ with `python-pptx`, `numpy`, `Pillow` (`opencv-python` for smoothing recordings, `faster-whisper` for the voice review); Node 18+ with `puppeteer-core` (`npm install` in `assets/engine`) and Chrome, Chromium or Edge; `ffmpeg`/`ffprobe`. Voices: [Kokoro](https://github.com/hexgrad/kokoro) (`pip install kokoro soundfile`) or VieNeu-TTS, both Apache 2.0 and local. If an engine lives in its own virtual environment, set `KOKORO_PYTHON` or `VIENEU_PYTHON` to that Python. A GPU helps but is optional.
+Tools: Python 3.10 to 3.12 (Kokoro does not install on 3.13+) with `python-pptx`, `numpy`, `Pillow` (`opencv-python` for smoothing recordings, `faster-whisper` for the voice review); Node 18+ with `puppeteer-core` (`npm install` in `assets/engine`) and Chrome, Chromium or Edge; `ffmpeg`/`ffprobe`. Voices: [Kokoro](https://github.com/hexgrad/kokoro) (`pip install kokoro soundfile`) or VieNeu-TTS, both Apache 2.0 and local. If an engine lives in its own virtual environment, set `KOKORO_PYTHON` or `VIENEU_PYTHON` to that Python. A GPU helps but is optional.
+
+**Which Python to run.** If the project has a `.venv` folder, run every script with that environment's Python: `.venv/Scripts/python` on Windows, `.venv/bin/python` elsewhere (or the `.venv` inside this skill folder if the user installed it there). Otherwise use `python`. The `python scripts/...` commands below mean that interpreter. `make_video.py` starts the other scripts with the same Python it was started with, so the whole run stays in the environment. If an import fails (`kokoro`, `faster_whisper`, `pptx`), you are on the wrong Python; do not `pip install` into the system Python, point at the venv instead.
 
 ## Workflow
 

@@ -71,7 +71,7 @@ def main():
     ap.add_argument("--full-render", action="store_true")
     a = ap.parse_args()
     if not (ENGINE / "node_modules" / "puppeteer-core").is_dir():
-        raise SystemExit(f"Install the renderer once: cd \"{ENGINE}\" && npm install")
+        raise SystemExit(f"Install the renderer once: npm install --prefix \"{ENGINE}\"")
     src = Path(a.slides).resolve()
     spec = json.loads(src.read_text(encoding="utf-8"))
     name = spec.get("file_name") or spec.get("ten_tep") or src.stem
