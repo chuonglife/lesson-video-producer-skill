@@ -4,6 +4,7 @@
   "S02": {"hold": 8},
   "S06": {"reveal_lines": [2, 3, 4, 5, 6, 7], "transition": "diagonal-wipe"},
   "S07": {"clip": {"file": "clips/S07-chatgpt.mp4", "start": 0.5, "length": 24, "mode": "frame", "speed": "auto"}},
+  "S08": {"clip": {"file": "clips/S08-claude.mp4", "mode": "full", "long_take": true}},
   "S09": {"circle": "B", "ken_burns": false},
   "S11": {"zoom": 2, "stepped": false, "effect": "pop", "auto_circle": false}
 }

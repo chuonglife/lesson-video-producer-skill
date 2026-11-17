@@ -208,6 +208,8 @@ Built on the instructional standard for video learning materials (one topic per 
 
 Lessons that teach an action show the real action. `record_screen.py` records one window (even when covered), scrolls it smoothly with small wheel steps, and checks the result. `check_motion.py` measures jumpy scrolling, which a still image never shows; `smooth_scroll.py` replays each jump as a smooth scroll. `composite_clips.py` places the recording inside the slide's frame (or full screen), fades it in over its own first frame, keeps it between 0.8x and 1.25x speed, and `--extend` adds silence when a recording runs longer than its narration.
 
+For long how-to lessons that are mostly screen recording there is a long-take mode: `record_actions.py` records a terminal session (Claude Code included) from an action script, with an action log, privacy masks and a required result review after every job; `long_take.py` turns the recording into an action table to write the narration from, then cuts or fast-forwards the waits, zooms into the text, highlights clicks and keys and lays each piece of narration on its own piece of picture. See SKILL.md step 2b.
+
 ## Fast re-renders
 
 Each slide is rendered to its own segment, named by a hash of everything that affects it (the slide image, its storyboard entry, its narration timing, the previous slide, the renderer). Fix one slide and only that segment is rendered again; the segments are joined without re-encoding. In the example (a 4 min 45 s lesson, 17 slides), the first render took 110 s of rendering; adding a zoom to one slide re-rendered 1 of 17 segments in 28 s, and the whole command, checks included, ran in 75 s. The voice is cached line by line in the same way, so editing one narration line regenerates one line.
@@ -278,6 +280,8 @@ scripts/check_video.py                measurements, report, contact sheets
 scripts/check_motion.py               jumpy-scroll detector
 scripts/smooth_scroll.py              smooths jumpy scrolling in a recording
 scripts/record_screen.py              window recorder with smooth scrolling (Windows)
+scripts/record_actions.py             records a terminal session from an action script (Windows)
+scripts/long_take.py                  long-take mode: action table, cut/fast-forward waits, zoom, click and key highlights
 scripts/gpu_lock.py                   one GPU job at a time
 scripts/make_sfx.py, make_music.py    regenerate the original sounds and the piano bed
 assets/engine/                        video.html, video.js (the frame renderer), render.mjs (Chrome + ffmpeg)

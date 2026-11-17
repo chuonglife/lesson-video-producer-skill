@@ -147,6 +147,26 @@ def main():
         cuts = [s["t0"] for s in plan["slides"]] if plan else []
         n_frames, jumps = find_jumps(str(v))
         real = [(t, d) for t, d in jumps if not any(-0.9 <= t - b <= 0.9 for b in cuts)]
+        # long takes: fast-forwards and cuts carry a label on purpose, they are not jumpy scrolls
+        ltp = v.parent / "_check" / "long-take.json"
+        lt = json.loads(ltp.read_text(encoding="utf-8")) if ltp.is_file() else None
+        if lt and lt.get("video") == v.name:
+            skip = [x for t in lt["takes"] for x in t.get("skip_jumps", [])]
+            n0 = len(real)
+            real = [(t, d) for t, d in real if not any(a <= t <= b for a, b in skip)]
+            for t in lt["takes"]:
+                facts.append(f"Long take {t['slide']} ({t['clip']}): source {t['source_s']} s -> {t['out_s']} s; {t['cuts']} waits cut ({t['cut_s']} s), "
+                             f"{len(t['fast'])} fast-forwards (saved {t['fast_saved_s']} s, speeds {', '.join(str(x['speed']) + 'x' for x in t['fast']) or '-'}), "
+                             f"held {t['hold_s']} s; {t['zoom']} zoom boxes (max {t['zoom_max']}x, step {t['zoom_step_max_px']} px/frame, jerk {t['zoom_jerk_max_px']} px/frame²); "
+                             f"{t['clicks']} clicks, {t['key_labels']} key labels{' (typing hidden)' if t.get('hide_typing') else ''}, {t.get('masks', 0)} masks; "
+                             f"fastest action piece {t['action_fastest']}x" + (f"; {n0 - len(real)} jumps inside fast/cut pieces ignored" if n0 != len(real) else ""))
+                if t["action_fastest"] > 1.251:
+                    errors.append(f"long take {t['slide']}: an action piece runs at {t['action_fastest']}x > 1.25x")
+                if t.get("zoom_jerk_max_px", 0) > 20:
+                    warnings.append(f"long take {t['slide']}: the zoom jolts (velocity changes {t['zoom_jerk_max_px']} px between frames; raise 'ease' or move the boxes apart)")
+                for g in t.get("groups", []):
+                    if g.get("short", 0) > 0.3:
+                        warnings.append(f"long take {t['slide']} group {g['group']}: the picture is {g['short']} s longer than the narration, its end is cut")
         facts.append(f"Motion: {n_frames} frames, {len(real)} scroll jumps" + (f" at {real[:8]}" if real else ""))
         if real:
             errors.append(f"{len(real)} jumpy scrolls (see the list)")

@@ -239,6 +239,34 @@ def regions_of_slide(shapes, spec, d):
     return static, items
 
 
+def long_take_of_slide(sid, ov, out):
+    """A slide with a long-take clip (video.json clip.long_take): its narration comes from segments[].narration of
+    <clip>.longtake.json, in groups (long_take.py); each group keeps its first and last line so the picture can follow.
+    Returns (info, extra pause at the end of the slide)."""
+    c = ov.get("clip") or {}
+    if not c.get("long_take"):
+        return None, 0.0
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from long_take import config_path, narration_groups, read_config
+    clip = c["file"] if os.path.isabs(c["file"]) else os.path.join(out, c["file"])
+    cfg_p = config_path(clip, c["long_take"])
+    if not cfg_p.is_file():
+        raise SystemExit(f"{sid}: {cfg_p} is missing; run long_take.py analyse {clip}, then write segments[].narration")
+    groups = narration_groups(read_config(cfg_p))
+    if not any(g["lines"] for g in groups):
+        raise SystemExit(f"{sid}: {cfg_p.name} has no narration yet. Record first, write after: read the action table, then write.")
+    lines, info = [], []
+    for k, g in enumerate(groups):
+        a0 = len(lines)
+        gl = list(g["lines"]) or ["."]
+        if g["pause"] > 0 and k < len(groups) - 1:
+            gl[-1] += f" |{g['pause']:g}"
+        lines += gl
+        info.append({"segments": [i + 1 for i in g["segments"]], "_a": a0, "_b": len(lines)})
+    print(f"{sid}: long take {cfg_p.name}: {len(groups)} narration groups, {len(lines)} lines (instead of the slide's narration)")
+    return {"config": str(cfg_p), "groups": info, "_lines": lines}, groups[-1]["pause"]
+
+
 def narration_lines(d):
     return [l.strip() for l in (d.get("narration") or "").splitlines() if l.strip()]
 
@@ -351,9 +379,13 @@ def main():
         png = os.path.join(preview, f"slide-{i:02d}.png")
         if not os.path.isfile(png):
             raise SystemExit(f"Missing {png}: run render_slides.py again.")
-        lines = narration_lines(d) or ["."]   # a silent slide gets a short silence from the voice step
+        lines = narration_lines(d)
+        lt_info, lt_pause = long_take_of_slide(sid, ov, out)
+        if lt_info:
+            lines = lt_info.pop("_lines")
+        lines = lines or ["."]   # a silent slide gets a short silence from the voice step
         stype = d["type"]
-        hold = hold_seconds(d, ov)
+        hold = hold_seconds(d, ov) + lt_pause
         notes = d.get("notes") or ""
         wants_circle = ov.get("circle") is not None or circle_target(notes) is not None
         extra = 2.4 if (hold > 0 and wants_circle) else 0.0   # time for the circle to be drawn after the wait
@@ -432,6 +464,10 @@ def main():
             "regions": items, "static": [s.bbox() for s in static], "actions": actions, "clip_frame": clip_frame,
             "notes": notes, "summary": str(d.get("title") or d.get("question") or d.get("message") or spec.get("lesson_title") or "")[:60],
         })
+        if lt_info:
+            for g in lt_info["groups"]:
+                g["from_line"], g["to_line"] = first_line + g.pop("_a"), first_line + g.pop("_b") - 1
+            out_slides[-1]["long_take"] = lt_info
         n_regions += len(items)
         when_txt = ",".join(str((a["line"] + 1) if isinstance(a["line"], int) else a["line"]) for a in actions if a["kind"] == "reveal")
         others = ", ".join(a["kind"] + (" (auto)" if a.get("auto") else "") for a in actions if a["kind"] != "reveal")

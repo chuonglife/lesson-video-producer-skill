@@ -74,6 +74,7 @@ def main():
         subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", base, "-c", "copy", out], check=True)
         return
     inputs, chains, last, errors = ["-i", base], [], "[0:v]", []
+    long_takes = []
     for k, (sid, c) in enumerate(clips):
         i = next(j for j, s in enumerate(slides) if s["id"] == sid)
         t_in = (0 if i == 0 else starts[slides[i]["from_line"] - 1]) + DELAY
@@ -82,6 +83,15 @@ def main():
         f = Path(c["file"]); f = f if f.is_absolute() else root / f
         if not f.is_file():
             errors.append(f"{sid}: clip not found {f}"); continue
+        if c.get("long_take"):
+            # long take: render the edited clip (waits cut or fast, zoom, clicks, keys, masks) to the narration of each group,
+            # then lay it over 1:1
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from long_take import render_for_slide
+            f, m = render_for_slide(slides[i], c, root, starts, t_in, t_out)
+            m = dict(m, slide=sid, t_in=round(t_in, 3), skip_jumps=[[a + t_in, b + t_in] for a, b in m.get("skip_jumps", [])])
+            long_takes.append(m)
+            c = {**c, "start": 0, "length": None, "speed": 1.0, "mode": c.get("mode", "full")}
         ss = float(c.get("start", 0))
         length = float(c.get("length") or max(0.1, duration(f) - ss))
         speed = c.get("speed", 1.0)
@@ -104,6 +114,12 @@ def main():
         print(f"clip {sid}: {t_in:.2f} to {t_out:.2f} s ({'full screen' if full else f'{w}x{h} at {x},{y}'}), {length:.1f} s x {speed:.2f}")
     if errors:
         raise SystemExit("\n".join(errors))
+    lt = Path(out).resolve().parent / "_check" / "long-take.json"
+    if long_takes:
+        lt.parent.mkdir(exist_ok=True)
+        lt.write_text(json.dumps({"video": Path(out).name, "takes": long_takes}, ensure_ascii=False, indent=1), encoding="utf-8")
+    elif lt.is_file():
+        lt.unlink()
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *inputs, "-filter_complex", ";".join(chains), "-map", last, "-map", "0:a?",
                     "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", out], check=True)
     print("wrote", out)

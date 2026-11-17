@@ -51,6 +51,14 @@ When the lesson teaches an action, show the real action. Never replace it with a
 4. Declare it in `video.json`: `"S07": {"clip": {"file": "clips/S07-name.mp4", "mode": "frame", "speed": "auto"}}`. The slide should be an `image` or `two-column` slide with a large frame; put the clip's first frame on it (`composite_clips.py --first-frame clips/S07-name.mp4 slides/<course>/<lesson>/S07-first-frame.png`) and rebuild the deck, so the clip fades in without a jump.
 5. Run `make_video.py ... --extend`: it adds silence where a recording runs longer than its narration. Never speed a recording beyond 1.25x.
 
+### Step 2b. Long-take mode (long how-to lessons that are mostly screen recording)
+
+Use it when the lesson is **a long hands-on task recorded in one go** and the recording is most of the video (for example Claude Code doing a real job for 2 to 15 minutes per step). A short demo inside one slide stays in step 2. Details, speed rules and privacy: `references/screen-recording.md` section 6. The workflow is **record first, write the narration after**:
+1. **Record from an action script (the default; recording by hand is the fallback)**: write `clips/<Sxx>-name.actions.json` (see `templates/actions.example.json`: open `wt.exe` with `claude` or another command, type like a person, key combos, `wait_done` for Claude Code to finish with automatic answers to permission prompts, scroll, click, `mark`, and a **required `review_result` after every job**: scroll up to the start of the answer and read down at 120 to 200 px/s with a 2 to 3 s stop per chunk, open the files the job wrote in a new tab of the recorded window; a script without it is refused unless `--skip-review "<reason>"`; this becomes a reading segment, never fast-forwarded or cut, and its narration explains the result). Run `python scripts/record_actions.py <actions.json>` (`--dry-run` to check without recording). The machine records with an action log, masks emails / API keys / `C:\Users\<name>` while they are on screen, stops by itself and writes the action table. By hand: `record_screen.py ... --log-events --hide-typing`, then `long_take.py analyse <clip>`.
+2. **Write the narration from the action table** `clips/<Sxx>-name.action-table.md` (+ `.action-table-NN.png`): fill `segments[].narration` in `<clip>.longtake.json`, pick `zoom` boxes from `zoom_suggestions`, check `waits` (fast | cut) and the masks.
+3. Declare it in `video.json`: `"S03": {"clip": {"file": "clips/S03-claude.mp4", "mode": "full", "long_take": true}}` (S03 an `image` slide with the clip's first frame). The slide's narration comes from the long-take config.
+4. `make_video.py` as usual: it fits narration and picture group by group (waits fast-forwarded up to 16x or cut with a "4 min later" label; action pieces never faster than 1.25x; a longer narration holds the last frame; a longer picture gets a pause), zooms and pans smoothly, draws a ripple at clicks and a key label in the corner. The report adds the seconds cut, the fast-forwards, the zoom boxes and the masks. Videos without `long_take` render exactly as before.
+
 ### Step 3. Render with one command
 
 ```bash
@@ -94,6 +102,7 @@ Keep the voice, music level and sounds the same across a course; lessons should 
 - `references/video-standards.md`: the instructional standard for audio and video learning materials, mapped to slide types, plus platform specs (Udemy and similar).
 - `references/motion-and-sound.md`: how regions and actions are inferred, the slide type table, motion numbers, the soundtrack, `video.json` syntax, how to keep learners awake.
 - `references/narration-voice.md`: Kokoro and VieNeu, pace, pronunciation fixes, the Whisper review.
-- `references/screen-recording.md`: recording a window, smooth scrolling, measuring and smoothing jumps, compositing, privacy.
+- `references/screen-recording.md`: recording a window, smooth scrolling, measuring and smoothing jumps, compositing, privacy; section 6 the long-take mode (recording from an action script, the action table, cutting or fast-forwarding waits, zoom, clicks, keys, masks).
+- `templates/actions.example.json`: an action script for a real Claude Code session.
 - `references/quality-checks.md`: thresholds of the final check and the contact-sheet checklist.
 - `templates/video.example.json`: per-slide overrides.

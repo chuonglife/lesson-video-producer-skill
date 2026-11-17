@@ -133,8 +133,8 @@ def main():
             changed = False
             for s in plan["slides"]:
                 c = (ov.get(s["id"]) or {}).get("clip")
-                if not c:
-                    continue
+                if not c or c.get("long_take"):
+                    continue   # a long take fits group by group (long_take.py fit), not the whole slide
                 cf = Path(c["file"]); cf = cf if cf.is_absolute() else out / cf
                 if not cf.is_file():
                     continue
@@ -147,6 +147,16 @@ def main():
                     changed = True
             if changed:
                 overrides.write_text(json.dumps(ov, ensure_ascii=False, indent=1), encoding="utf-8")
+                steps_1_to_4()
+        if overrides.is_file() and any(isinstance(v, dict) and (v.get("clip") or {}).get("long_take")
+                                       for v in json.loads(overrides.read_text(encoding="utf-8")).values()):
+            # long take: a group whose picture cannot shrink to its narration (actions never above 1.25x) gets a pause, then 1-4 again
+            for _ in range(3):
+                r = subprocess.run([str(c) for c in [py, HERE / "long_take.py", "fit", board, tl, overrides]])
+                if r.returncode == 0:
+                    break
+                if r.returncode != 3:
+                    raise SystemExit(f"STOPPED at 4/9: long_take.py fit failed (exit code {r.returncode})")
                 steps_1_to_4()
     if a.from_step <= 5:
         run([py, HERE / "mix_audio.py", voice, events, audio, "--music-db", a.music_db] + (["--no-music"] if a.no_music else []) +

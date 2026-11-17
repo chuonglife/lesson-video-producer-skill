@@ -1,0 +1,26 @@
+{
+ "_note": "Action script for record_actions.py. Save it next to the clip: videos/<course>/<lesson>/clips/S03-claude.actions.json. See references/screen-recording.md section 6.1. A review_result step is REQUIRED after every job. Do not type /exit or exit at the end: the machine stops recording first, then closes the window. Claude Code's 'Accessing workspace' prompt defaults to 'No, exit': answer Down, then Enter.",
+ "out": "S03-claude.mp4",
+ "out_size": "1920x1080",
+ "max_seconds": 1200,
+ "hide_typing": true,
+ "language": "en",
+ "wait_mode": "fast",
+ "window": {"command": ["claude"], "cwd": "D:/demo-course", "title": "REC-S03", "size": [1600, 900], "font_zoom": 2},
+ "masks": [],
+ "private": [],
+ "steps": [
+  {"wait_done": {"busy": "", "still": 3, "max": 45, "answer": [
+    {"text": "Yes, I trust this folder", "keys": ["Down", "Enter"], "delay": 1.5},
+    {"text": "Chrome extension detected", "keys": "Esc", "delay": 1.0}]}},
+  {"mark": "task"},
+  {"pause": 1},
+  {"type": "Write the quiz for lesson 2 from lessons/M01-L02/01_objectives.md"},
+  {"pause": 0.8},
+  {"key": "Enter"},
+  {"mark": "claude-works"},
+  {"wait_done": {"busy": "esc to interrupt", "still": 4, "max": 900, "start_within": 20, "answer": [{"text": "Do you want", "keys": "Enter", "delay": 1.5}]}},
+  {"mark": "result"},
+  {"review_result": {"speed": 160, "dwell": 2.5, "files": ["assessments/M01-L02/01_blueprint.md"], "zoom": [0, 0, 0.7, 0.7]}}
+ ]
+}
