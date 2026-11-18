@@ -3,7 +3,8 @@
 """
 CHECK THE FINISHED LESSON VIDEO with measurements, then write a report. Exit code 1 when a hard rule fails.
 
-Usage:  python check_video.py <video.mp4> [--timeline <timeline.json>] [--events <events.json>] [--out <report.md>]
+Usage:  python check_video.py <video.mp4> [--timeline <timeline.json>] [--events <events.json>] [--storyboard <storyboard.json>]
+                              [--out <report.md>]
 
 Measures against the thresholds in references/quality-checks.md:
   1. Picture: 1920x1080, 30 fps, H.264 yuv420p, length matches the timeline (within 1 s).
@@ -12,7 +13,12 @@ Measures against the thresholds in references/quality-checks.md:
   3. Motion: nothing stands still for more than 25 s (frame difference sampled every second, learner pauses excepted);
      no jumpy scrolling (check_motion.py, ignoring 0.9 s around each slide change).
   4. Density: 4 to 16 sound effects per minute; 1 to 6 slides per minute.
-  5. Contact sheets: _check/contact-NN.png, three frames per slide (arriving, settled, about to leave). LOOK at them
+  5. Voice-picture sync (needs --timeline and --events; hard rules when the storyboard was built with "sync"):
+     the voice of a slide starts at least 0.15 s after its transition has finished; a region has finished appearing before
+     the line that mentions it starts; in ordered slides (process, table) regions appear in position order; no slide on
+     screen for less than 2 s; no scene (the picture between two changes of picture) under 1.5 s in a long take; the
+     placeholder slide never flashes around a full-screen clip.
+  6. Contact sheets: _check/contact-NN.png, three frames per slide (arriving, settled, about to leave). LOOK at them
      before reporting the video as done.
 """
 import argparse
@@ -30,6 +36,95 @@ try:
 except Exception:
     pass
 HERE = Path(__file__).resolve().parent
+
+TRANS_DUR = {"push-left": .68, "fade-up": .6, "iris": .75, "zoom-blur": .7, "diagonal-wipe": .62, "push-up": .62}   # = assets/engine/video.js
+VOICE_AFTER_PICTURE = 0.15    # the voice of a slide starts at least this long after the transition ended (target 0.4 s)
+REGION_BEFORE_VOICE = -0.05   # a region has finished appearing before (or when) the voice mentions it
+MIN_SLIDE = 2.0
+MIN_SCENE = 1.5
+
+
+def env_db(f, sr=16000):
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", str(f), "-map", "0:a:0", "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"], capture_output=True)
+    x = np.frombuffer(r.stdout, np.int16).astype(np.float32) / 32768
+    n = len(x) // 160
+    return 20 * np.log10(np.sqrt((x[:n * 160].reshape(n, 160) ** 2).mean(1)) + 1e-9) if n else np.zeros(0)
+
+
+def check_sync(v, tl, plan, board, hard, soft, facts):
+    """Voice-picture sync from the timeline (speech_start = when the voice really starts), the render plan (when each slide
+    finished entering and each region finished appearing) and the storyboard (which slides are ordered, which are covered by a clip)."""
+    L = tl["lines"]
+    speech = [l.get("speech_start") for l in L]
+    if any(x is None for x, l in zip(speech, L) if l.get("text")):
+        # an older timeline: measure the voice start on the finished video's audio (first frame louder than -38 dB after the line start)
+        db = env_db(v)
+        for k, l in enumerate(L):
+            if speech[k] is None:
+                j = int(l["start"] * 100)
+                while len(db) and j < len(db) - 1 and db[j] < -38:
+                    j += 1
+                speech[k] = j / 100 if len(db) else l["start"]
+    stop = [l.get("speech_end", l["end"]) for l in L]
+    sync = bool(board.get("sync")) and bool(plan.get("sync"))
+    bucket = hard if sync else soft
+    late, region_late, overlap, gaps = [], [], [], []
+    for i, bs in enumerate(board["slides"]):
+        if i == 0:
+            continue
+        ps = plan["slides"][i]
+        entered = ps.get("entered", ps["t0"] + TRANS_DUR.get(bs.get("transition"), .65))
+        k = bs["from_line"] - 1
+        if not L[k].get("text"):
+            continue
+        gap = speech[k] - entered
+        gaps.append(gap)
+        if gap < VOICE_AFTER_PICTURE:
+            late.append(f"{bs['id']} {gap:+.2f}s")
+        if stop[k - 1] > ps["t0"] + 0.05 and L[k - 1].get("text"):
+            overlap.append(f"{bs['id']} (the previous slide's voice still runs {stop[k - 1] - ps['t0']:.2f}s into the transition)")
+    for r in plan.get("reveals", []):
+        if r.get("line") is None or not L[r["line"]].get("text"):
+            continue
+        d = speech[r["line"]] - r["done"]
+        if d < REGION_BEFORE_VOICE:
+            region_late.append(f"{r['id']} region {r['region']} {d:+.2f}s")
+    if gaps:
+        facts.append(f"Voice-picture sync: the voice starts on average {np.mean(gaps):+.2f} s after the slide has arrived (min {min(gaps):+.2f} s, "
+                     f"limit {VOICE_AFTER_PICTURE} s); slides where the voice leads: {len(late)}/{len(gaps)}; "
+                     f"regions finishing after the voice: {len(region_late)}/{len(plan.get('reveals', []))}")
+    if late:
+        bucket.append(f"the voice starts before the picture has settled on {len(late)} slides: {', '.join(late[:10])}"
+                      + ("" if sync else " (built from an older storyboard: run storyboard.py again)"))
+    if region_late:
+        bucket.append(f"the voice mentions a region before it has finished appearing in {len(region_late)} places: {', '.join(region_late[:10])}")
+    if overlap:
+        bucket.append("a slide changes while the previous slide's voice is still running: " + ", ".join(overlap[:8]))
+    # reveal order: process and table regions must appear in position order
+    flipped = []
+    by_slide = {}
+    for r in plan.get("reveals", []):
+        by_slide.setdefault(r["id"], []).append(r)
+    for bs in board["slides"]:
+        if bs["type"] not in ("process", "table"):
+            continue
+        rs = sorted(by_slide.get(bs["id"], []), key=lambda r: r["region"])
+        for a, b in zip(rs, rs[1:]):
+            if b["T"] + 1e-6 < a["T"]:
+                flipped.append(f"{bs['id']} region {b['region']} before region {a['region']}")
+                break
+    if flipped:
+        bucket.append("regions appear out of order in an ordered slide: " + ", ".join(flipped))
+    # short slides
+    short = [f"{ps['id']} {ps['t1'] - ps.get('entered', ps['t0']):.2f}s" for ps, bs in zip(plan["slides"], board["slides"])
+             if not bs.get("covers_clip") and ps["t1"] - ps.get("entered", ps["t0"]) < MIN_SLIDE]
+    facts.append(f"Short scenes: slides under {MIN_SLIDE} s: {len(short)}")
+    if short:
+        bucket.append("slide on screen for too short a time: " + ", ".join(short[:10]))
+    # circles and pointer
+    n_cursor = sum(s.get("cursor_marks", 0) for s in plan["slides"])
+    n_circles = sum(s.get("circles", 0) for s in plan["slides"])
+    facts.append(f"Attention circles: {n_circles}; teaching pointer: {'on' if board.get('cursor') else 'off'}, {n_cursor} pointer stops")
 
 
 def ff_log(args):
@@ -94,7 +189,7 @@ def contact_sheets(video, slides, folder):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("video"); ap.add_argument("--timeline"); ap.add_argument("--events"); ap.add_argument("--out")
+    ap.add_argument("video"); ap.add_argument("--timeline"); ap.add_argument("--events"); ap.add_argument("--storyboard"); ap.add_argument("--out")
     a = ap.parse_args()
     v = Path(a.video)
     errors, warnings, facts = [], [], []
@@ -155,6 +250,13 @@ def main():
             n0 = len(real)
             real = [(t, d) for t, d in real if not any(a <= t <= b for a, b in skip)]
             for t in lt["takes"]:
+                for sc in t.get("scenes", []):
+                    if sc["out_to"] - sc["out_from"] < MIN_SCENE:
+                        errors.append(f"long take {t['slide']}: a {sc['kind']} scene at {t['t_in'] + sc['out_from']:.1f} s lasts only "
+                                      f"{sc['out_to'] - sc['out_from']:.2f} s (< {MIN_SCENE} s)") if lt.get("sync", True) else \
+                            warnings.append(f"long take {t['slide']}: a short {sc['kind']} scene of {sc['out_to'] - sc['out_from']:.2f} s")
+                if 0.05 < t.get("slide_exposed_s", 0) < MIN_SCENE:
+                    errors.append(f"long take {t['slide']}: the placeholder slide flashes for {t['slide_exposed_s']:.2f} s around the clip")
                 facts.append(f"Long take {t['slide']} ({t['clip']}): source {t['source_s']} s -> {t['out_s']} s; {t['cuts']} waits cut ({t['cut_s']} s), "
                              f"{len(t['fast'])} fast-forwards (saved {t['fast_saved_s']} s, speeds {', '.join(str(x['speed']) + 'x' for x in t['fast']) or '-'}), "
                              f"held {t['hold_s']} s; {t['zoom']} zoom boxes (max {t['zoom_max']}x, step {t['zoom_step_max_px']} px/frame, jerk {t['zoom_jerk_max_px']} px/frame²); "
@@ -185,6 +287,12 @@ def main():
             warnings.append("slides change too fast (> 6/min)")
         if spm < 1:
             warnings.append("slides change too slowly (< 1/min)")
+        sb = Path(a.storyboard) if a.storyboard else (Path(str(a.events).replace(".events.json", ".storyboard.json")) if a.events else None)
+        if a.timeline and sb and sb.is_file() and "reveals" in plan:
+            try:
+                check_sync(v, tl, plan, json.loads(sb.read_text(encoding="utf-8")), errors, warnings, facts)
+            except Exception as e:
+                warnings.append(f"could not check the voice-picture sync: {e}")
         files = contact_sheets(v, plan["slides"], v.parent / "_check")
         facts.append("Contact sheets: " + ", ".join(f.name for f in files))
     verdict = "PASS" if not errors else "FAIL"

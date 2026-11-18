@@ -8,3 +8,8 @@ claude>clawd
 fourth>forth
 pptx>ppt x
 json>jason
+you are>youre
+they are>theyre
+we are>were
+do not>dont
+can not>cant

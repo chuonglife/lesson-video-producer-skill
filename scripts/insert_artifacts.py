@@ -16,6 +16,10 @@ Declared in <clip>.longtake.json, key "inserts" (a list):
                                    slides 2.5 s for the overview plus 2.2 s per slide)
    "pages": [1, 2],                document: the pages to show; slides: the slides to show (numbered from 1)
    "lines": [1, 60],               text (md/txt/json/csv): the lines from-to
+   "static": true,                 text: ONE still frame (no scrolling) that fits 1080 px, so zoom and outline can point at an exact spot
+   "outline": [{"from": 2, "to": 12, "box": [x, y, w, h]}]   orange frame around a region, fading in over 0.3 s; box on the 1920x1080
+                                   frame BEFORE the zoom (so it follows the zoom); seconds inside the insert. For still frames
+                                   (images, static text); on a scrolling strip the frame does not follow the text
    "start": 0, "length": 10,       video: the part to play (seconds of the inserted video); "volume": 0.35 (default 1 without
                                    narration, 0.35 under narration)
    "zoom": [{"from": 2, "to": 8, "box": [x, y, w], "ease": 0.8}]   seconds INSIDE the insert; box = x, y, width on the 1920x1080
@@ -306,7 +310,19 @@ class Insert:
 
     def _text(self, item, f, ext, cache):
         # utf-8-sig: a byte order mark (Windows editors, PowerShell) would turn "# Title" into plain text
-        self._set_strip(_text_strip(f.read_text(encoding="utf-8-sig", errors="replace"), ext, item.get("lines")), item.get("seconds"))
+        strip = _text_strip(f.read_text(encoding="utf-8-sig", errors="replace"), ext, item.get("lines"))
+        if item.get("static"):
+            # ONE still frame (so zoom and outline can point at an exact spot): the text goes below the label band and must fit 1080 px
+            used = np.nonzero((strip != np.array(BG_BGR, np.uint8)).any(axis=2).any(axis=1))[0]
+            height = int(used.max()) + 1 if len(used) else 0
+            top = BAND - 40
+            if height + top > OUT_H:
+                raise SystemExit(f"insert_artifacts: \"static\" but the text is {height} px high and does not fit one frame under the label band; use fewer \"lines\"")
+            im = np.empty((OUT_H, OUT_W, 3), np.uint8); im[:] = BG_BGR
+            im[top:top + height] = strip[:height]
+            self.mode, self.im, self.seconds = "still", im, float(item.get("seconds") or 12)
+            return
+        self._set_strip(strip, item.get("seconds"))
 
     def _image(self, item, f, ext, cache):
         self.mode, self.im, self.seconds = "still", _fit(_read(f), margin=0.08), float(item.get("seconds") or 6)
@@ -403,8 +419,24 @@ class Insert:
         else:
             f = self._video_frame(min(t, self.seconds))
             out = _fit(f) if f is not None else np.full((OUT_H, OUT_W, 3), BG_BGR, np.uint8)
+        out = self._outline(out, t)
         out = self._zoom(out, t)
         out[:BAND - 8] = BG_BGR          # the label band: scrolled text never runs under the label
+        return out
+
+    def _outline(self, out, t):
+        """"outline": [{"from", "to", "box": [x, y, w, h]}]: an orange frame around a region, fading in over 0.3 s. Drawn on the
+        1920x1080 frame BEFORE the zoom, so it follows the zoom. For still frames; on a scrolling strip it does not follow the text."""
+        import cv2
+        for o in self.item.get("outline") or []:
+            a, b = float(o.get("from", 0)), float(o.get("to", 1e9))
+            if not a <= t <= b:
+                continue
+            alpha = min(1.0, (t - a) / 0.3)
+            x, y, w, h = (int(v) for v in o["box"])
+            ov = out.copy()
+            cv2.rectangle(ov, (x, y), (x + w, y + h), tuple(reversed(ACCENT_RGB)), 6, cv2.LINE_AA)
+            out = cv2.addWeighted(ov, alpha, out, 1 - alpha, 0)
         return out
 
     def _zoom(self, out, t):

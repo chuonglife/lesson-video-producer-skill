@@ -147,3 +147,17 @@ When Claude Code reports a job done, learners must SEE what it made (a document,
 - An insert is a SEGMENT of its own: with `narration` it opens a new narration group, without it the group before carries on. A longer narration stretches the insert (a slower scroll); a shorter one shrinks it by at most 30% (never under 2 s, a video never). If it still does not fit, `fit` adds `pause_after` on the insert itself. The fast-forward and cut rules for waits never touch it; the report lists the inserts, and their in and out cross-fades are not counted as jumpy scrolls.
 - Small text in a document (a folder tree, a table): add `zoom` on the part being read; `box` is x, y, width on the 1920x1080 frame of the insert, seconds are seconds inside the insert. Pages are cached in `_insert-cache/` next to the config and rebuilt when the file changes (the hash of the rendered clip includes the size and time of every inserted file).
 - Office files and decks without slide images need LibreOffice and Poppler (`pdftoppm`; on Windows `winget install oschwartz10612.Poppler`). LibreOffice starts in the background for a moment, so do not render while a recording is running.
+
+
+### 6.6 A still frame with zoom and outline (`static`, `outline` in `inserts`)
+
+To zoom into and outline one exact spot of an inserted text (for example the conclusion line and the objectives table of a review report), set `"static": true` together with `lines: [a, b]` so the text fits ONE 1080 px frame (otherwise the renderer stops with an error and asks for fewer lines): the text sits under the label band and does not scroll. `outline: [{"from", "to", "box": [x, y, w, h]}]` draws an orange frame (fading in over 0.3 s) on the 1920x1080 frame BEFORE the zoom, so it follows the zoom; seconds are seconds inside the insert. On a scrolling strip the outline does not follow the text, so do not use it there.
+
+### 6.7 Reveal order and the same-row cap (`storyboard.py`)
+
+- `process` and `table` slides (row by row) and numbered lists (3 or more zones starting 1, 2, 3...) reveal their zones IN POSITION ORDER: a later zone never appears before an earlier one, and it only matches words from the line of the previous zone onwards. A label "6" once matched the word "six" in an opening sentence ("The skill runs six steps") and pulled step 6 to the front. The build is stopped by an automatic check ("SHOW ORDER ERROR") if the order is still inverted; to invert it on purpose set `"S04": {"order": false}` in `video.json`.
+- `closing`, `question` and `key-message` slides: at most 2 zones reveal on the same line (a third zone moves to the next line). The renderer staggers zones on the same line by 0.25 s and makes the last zone finish 0.3 s before the voice does; with three zones on the first line the last one would finish after the voice (the video check reports "a cue for the previous zone before the zone has finished appearing", -0.12 s). No manual line hint is needed any more.
+
+### 6.8 Audio peak limit in the final composite
+
+`composite_clips.py` always passes the audio through `alimiter=limit=0.75` (sample peak at most -2.5 dBFS) AFTER mixing the sound of an inserted video, even when there is no clip (the copy step then re-encodes the audio too). Before this, the peak reached -0.1 dBTP when an inserted artifact video had sound, and the video check refuses anything above -1 dBTP.

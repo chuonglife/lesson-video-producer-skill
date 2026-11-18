@@ -196,6 +196,7 @@ One command runs steps 2 to 7: `python scripts/make_video.py slides/<course>/<le
 
 Built on the instructional standard for video learning materials (one topic per video, a script, opening-presentation-closing, spoken transitions, interaction) and on Mayer's multimedia principles:
 
+- **The picture arrives before the voice, never after.** A slide settles 0.4 s before its first line, each card appears on the first sentence that mentions it and finishes 0.3 s early, steps and table rows keep their order, and `check_video.py` measures all of it. In English lessons a small teaching pointer moves to the idea being explained (switch it off with `"_all": {"cursor": false}`).
 - **Things appear when the voice says them** (temporal contiguity, signalling). Cards pop in one by one, steps slide up, compare columns come in from their own side, table rows arrive row by row.
 - **Something changes every 5 to 10 seconds**, and nothing stands still for more than 25: reveals, attention circles, gentle zooms and a very slow Ken Burns push on long slides.
 - **One focal point per frame.** No spins, flips or flying letters; text never moves while it is being read.

@@ -224,27 +224,73 @@ async def main(a):
             tts_kokoro(t2, voice, f, speed[i])
         print(f"  line {i + 1}/{len(lines)}", flush=True)
 
+    # Voice-picture sync: a storyboard.json next to the narration file (written by storyboard.py with "sync": 1) gives each slide
+    # a "lead_wait" = transition seconds + a short settle that the picture needs BEFORE the voice starts. If the real silence
+    # between the end of the previous line and the first sound of the first line of a slide is shorter, the gap is widened.
+    need_pause = {}
+    nar = Path(str(a.narration))
+    bp = Path(str(nar)[:-len(".narration.txt")] + ".storyboard.json") if str(nar).endswith(".narration.txt") else None
+    if bp and bp.is_file():
+        try:
+            bj = json.loads(bp.read_text(encoding="utf-8"))
+            if bj.get("sync") and bj.get("line_count") == len(lines):
+                for sl in bj["slides"][1:]:
+                    if sl.get("lead_wait"):
+                        need_pause[sl["from_line"] - 1] = float(sl["lead_wait"]) + 0.15
+        except Exception as e:
+            print("cannot read", bp, e)
+
+    def edge_silence(w):
+        """Leading and trailing silence of a voice file in seconds (threshold: peak - 40 dB, floor -50 dBFS, 10 ms frames)."""
+        try:
+            import numpy as np
+            r = subprocess.run(["ffmpeg", "-v", "error", "-i", str(w), "-ac", "1", "-ar", "16000", "-f", "s16le", "-"], capture_output=True)
+            x = np.frombuffer(r.stdout, np.int16).astype(np.float32) / 32768
+            n = len(x) // 160
+            if n < 3:
+                return 0.0, 0.0
+            db = 20 * np.log10(np.sqrt((x[:n * 160].reshape(n, 160) ** 2).mean(1)) + 1e-9)
+            on = np.nonzero(db > max(-50.0, db.max() - 40))[0]
+            if not len(on):
+                return 0.0, 0.0
+            return on[0] / 100, (n - 1 - on[-1]) / 100
+        except Exception:
+            return 0.0, 0.0
+
     def silence(sec, name):
         p = cache / name
         ff("-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", f"{max(0.05, sec):.3f}", str(p))
         return p
 
+    is_blank = lambda x: x in (".", "..", "…")
+    wavs, edges = {}, {}
+    for i, text in enumerate(lines):          # measure first: the next line's leading silence enters the pause calculation
+        if is_blank(text):
+            continue
+        w = cache / f"w{i:03d}.wav"
+        af = ["-af", f"atempo={speed[i]}"] if natural and a.engine == "edge" else []
+        ff("-i", str(cache / f"l{i:03d}{tag(i)}.{ext}"), *af, "-ar", "24000", "-ac", "1", str(w))
+        wavs[i] = (w, duration(w)); edges[i] = edge_silence(w)
     parts, timeline, t = [silence(LEAD, "lead.wav")], [], LEAD
+    widened = 0
     for i, text in enumerate(lines):
-        if text in (".", "..", "…"):
+        if is_blank(text):
             d = 1.2
             parts.append(silence(d, f"e{i:03d}.wav"))
             timeline.append({"n": i + 1, "start": round(t, 3), "end": round(t + d, 3), "text": ""})
             t += d
         else:
-            w = cache / f"w{i:03d}.wav"
-            af = ["-af", f"atempo={speed[i]}"] if natural and a.engine == "edge" else []
-            ff("-i", str(cache / f"l{i:03d}{tag(i)}.{ext}"), *af, "-ar", "24000", "-ac", "1", str(w))
-            d = duration(w)
-            timeline.append({"n": i + 1, "start": round(t, 3), "end": round(t + d, 3), "text": text})
+            w, d = wavs[i]
+            l0, l1 = edges[i]
+            timeline.append({"n": i + 1, "start": round(t, 3), "end": round(t + d, 3),
+                             "speech_start": round(t + l0, 3), "speech_end": round(t + d - l1, 3), "text": text})
             parts.append(w); t += d
         nxt = lines[i + 1] if i + 1 < len(lines) else None
         g = gap_natural(text, nxt) if natural else gap_slow(text, nxt) if a.pace == "slow" else (GAP_PERIOD if text.endswith(".") else GAP_COMMA)
+        if i + 1 in need_pause:
+            real = (edges[i][1] if i in edges else 0.0) + g + (edges[i + 1][0] if i + 1 in edges else 0.0)
+            if real < need_pause[i + 1]:
+                g += need_pause[i + 1] - real; widened += 1
         g += extra[i]
         parts.append(silence(g, f"g{i:03d}.wav")); t += g
     parts.append(silence(TAIL, "tail.wav"))
@@ -257,7 +303,8 @@ async def main(a):
                                             "lines": timeline}, ensure_ascii=False, indent=1), encoding="utf-8")
     talk = sum(l["end"] - l["start"] for l in timeline)
     print(f"{len(lines)} lines, {real:.1f} s ({int(real // 60)} min {int(real % 60)} s), {a.engine}/{voice}, "
-          f"{words / max(talk, 1):.1f} words/s while speaking, {words / real * 60:.0f} words/min overall")
+          f"{words / max(talk, 1):.1f} words/s while speaking, {words / real * 60:.0f} words/min overall"
+          + (f"; widened the pause before {widened}/{len(need_pause)} slide changes so the picture arrives before the voice" if need_pause else ""))
 
 
 if __name__ == "__main__":

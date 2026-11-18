@@ -4,19 +4,33 @@
 SMOOTH THE SCROLLING of a screen recording: browsers and apps often scroll a whole notch in one frame, which looks like
 a jerk in a lesson video. This finds every such jump and replays it over several frames on an ease-in-out curve.
 
-Usage:  python smooth_scroll.py <in.mp4> <out.mp4> [--fixed-bottom PX] [--cursor-template cursor.png] [--start S] [--length S]
+Usage:  python smooth_scroll.py <in.mp4> <out.mp4> [--fixed-top PX] [--fixed-bottom PX] [--cursor-template cursor.png]
+                                [--start S] [--length S]
+        python smooth_scroll.py <in.mp4> <out.mp4> --segments <clip.longtake.json> [--work-dir DIR] [--keep-work] [--min-segment 3]
+  --fixed-top         height of a band at the top that does not scroll (a tab strip, a title bar). Default 0.
   --fixed-bottom      height of a band at the bottom that does not scroll (a chat input box, a status bar). Default 0.
   --cursor-template   a small PNG of the mouse pointer as it appears in the recording: the pointer is removed from the
                       scrolled content and redrawn where it really is, so it does not slide with the page. Optional.
 How: for every frame pair whose content shifts vertically (phase correlation), build a panorama from the frame before
 and the frame after, then replay the scroll over 12 to 48 frames (about 0.4 s or more) so no frame moves more than about
 32 px. Sudden re-layouts that are not a clean scroll are cross-faded instead. The clip keeps its length: replaced
-original frames are dropped. Works at any resolution; measure the result again with check_motion.py.
+original frames are dropped (a very long scroll consumes extra original frames; it never inserts new ones, so the clip
+and every timestamp measured on it stay valid). Works at any resolution; measure the result again with check_motion.py.
+
+--segments: smooth a long clip piece by piece instead of in one pass, keeping the duration of every piece exactly (so the
+seconds in the long-take config and in the action log stay right). The pieces are the "segments" of the config (each
+segment starts at its "from"; the first starts at 0, the last ends at the clip end). A piece is left untouched when it is
+not longer than --min-segment seconds, when its midpoint falls inside a "waits" entry (a wait is fast-forwarded or cut
+later, smoothing it is wasted time and can build a wrong panorama), or when the segment has "smooth": false. Every
+other piece is cut (30 fps, crf 12), smoothed, stretched or shrunk back to exactly its length, and all pieces are
+joined again (crf 16, no audio). Exits with an error when the output duration differs from the input by more than 0.1 s.
 """
 import argparse
 import json
+import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -48,14 +62,79 @@ def ease(t):
     return 1 - 0.5 * v * (1 - t) ** 2 / r
 
 
+def duration(path):
+    return float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)]).decode())
+
+
+def ffmpeg(*args):
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", *map(str, args)], check=True)
+
+
+def smooth_by_segments(a):
+    """--segments mode: cut the clip at the segment starts, smooth only the pieces worth it, join them, same duration."""
+    cfg = json.load(open(a.segments, encoding="utf-8"))
+    segs = sorted(cfg.get("segments") or [], key=lambda d: float(d["from"]))
+    waits = [(float(w["from"]), float(w["to"])) for w in cfg.get("waits") or []]
+    src, dst = Path(a.src), Path(a.dst)
+    work = Path(a.work_dir) if a.work_dir else dst.with_name(dst.name + ".segments-work")
+    work = work.resolve()                         # the concat list needs absolute paths
+    work.mkdir(parents=True, exist_ok=True)
+    total = duration(src)
+    cuts = [0.0] + [float(d["from"]) for d in segs][1:] + [total]
+    extra = []
+    if a.fixed_top:
+        extra += ["--fixed-top", str(a.fixed_top)]
+    if a.fixed:
+        extra += ["--fixed-bottom", str(a.fixed)]
+    if a.tpl:
+        extra += ["--cursor-template", a.tpl]
+    parts, smoothed = [], 0
+    for i in range(len(cuts) - 1):
+        t0, t1 = cuts[i], cuts[i + 1]
+        d = t1 - t0
+        if d <= 0:
+            continue
+        raw, out = work / f"p{i:02d}.raw.mp4", work / f"p{i:02d}.mp4"
+        ffmpeg("-ss", f"{t0:.3f}", "-i", src, "-t", f"{d:.3f}", "-an", "-vf", "fps=30", "-c:v", "libx264", "-crf", "12", "-preset", "fast", raw)
+        mid = (t0 + t1) / 2
+        in_wait = any(w0 <= mid <= w1 for w0, w1 in waits)
+        seg_ok = segs[i].get("smooth", True) if i < len(segs) else True
+        if d > a.min_segment and not in_wait and seg_ok:
+            sm = work / f"p{i:02d}.sm.mp4"
+            subprocess.run([sys.executable, "-X", "utf8", str(Path(__file__).resolve()), str(raw), str(sm), *extra], check=True, capture_output=True)
+            ds = duration(sm)
+            ffmpeg("-i", sm, "-vf", f"setpts=PTS*{d / ds:.6f},fps=30", "-t", f"{d:.3f}", "-c:v", "libx264", "-crf", "12", "-preset", "fast", out)
+            smoothed += 1
+        else:
+            shutil.copy2(raw, out)
+        parts.append(out)
+    lst = work / "list.txt"
+    lst.write_text("\n".join(f"file '{p.as_posix()}'" for p in parts), encoding="utf-8")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg("-f", "concat", "-safe", "0", "-i", lst, "-c:v", "libx264", "-crf", "16", "-preset", "fast", "-pix_fmt", "yuv420p", dst)
+    out_len = duration(dst)
+    print(f"in {total:.2f} s -> out {out_len:.2f} s; {len(parts)} pieces, smoothed {smoothed}; {dst}")
+    if not a.keep_work:
+        shutil.rmtree(work, ignore_errors=True)
+    if abs(out_len - total) > 0.1:
+        sys.exit(f"ERROR: duration differs by {out_len - total:+.2f} s from the input")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src"); ap.add_argument("dst")
+    ap.add_argument("--fixed-top", dest="fixed_top", type=int, default=0)
     ap.add_argument("--fixed-bottom", dest="fixed", type=int, default=0)
     ap.add_argument("--cursor-template", dest="tpl")
     ap.add_argument("--start", default="0"); ap.add_argument("--length", default="0")
+    ap.add_argument("--segments", help="long-take config (.longtake.json): smooth piece by piece, keeping every piece's duration")
+    ap.add_argument("--work-dir", dest="work_dir"); ap.add_argument("--keep-work", action="store_true")
+    ap.add_argument("--min-segment", dest="min_segment", type=float, default=3.0, help="pieces not longer than this (s) are left as they are")
     a = ap.parse_args()
+    if a.segments:
+        return smooth_by_segments(a)
     W, H = probe(a.src)
+    TOP = a.fixed_top                             # fixed band at the top
     HS = H - a.fixed                              # scrolling area
     S = max(1, W // 320)                          # downscale factor for fast shift estimates
     MIN_DY = max(8, int(14 * H / 720))
@@ -80,7 +159,7 @@ def main():
         return cv2.inpaint(g, m, 3, cv2.INPAINT_TELEA)
 
     def small(f):
-        return f[:HS:S, ::S].astype(np.float32).mean(axis=2)
+        return f[TOP:HS:S, ::S].astype(np.float32).mean(axis=2)
 
     def shift(a_, b_):
         A = np.fft.fft2(a_ - a_.mean()); B = np.fft.fft2(b_ - b_.mean())
@@ -96,13 +175,14 @@ def main():
 
     def refine(f1, f2, y0):
         """Exact vertical shift in pixels: the content of f2 equals f1 moved up by n. Try n around the rough estimate."""
-        g1 = f1[:HS, W // 10: W - W // 10].astype(np.float32).mean(axis=2)
-        g2 = f2[:HS, W // 10: W - W // 10].astype(np.float32).mean(axis=2)
+        g1 = f1[TOP:HS, W // 10: W - W // 10].astype(np.float32).mean(axis=2)
+        g2 = f2[TOP:HS, W // 10: W - W // 10].astype(np.float32).mean(axis=2)
+        HC = HS - TOP
         best, bn = 1e9, y0
         for n in range(y0 - 6, y0 + 7):
-            if n == 0 or abs(n) >= HS - 40:
+            if n == 0 or abs(n) >= HC - 40:
                 continue
-            e = np.abs(g1[n:HS - 40] - g2[:HS - 40 - n]).mean() if n > 0 else np.abs(g1[:HS - 40 + n] - g2[-n:HS - 40]).mean()
+            e = np.abs(g1[n:HC - 40] - g2[:HC - 40 - n]).mean() if n > 0 else np.abs(g1[:HC - 40 + n] - g2[-n:HC - 40]).mean()
             if e < best:
                 best, bn = e, n
         return bn
@@ -183,17 +263,23 @@ def main():
             d = abs(net)
             fin = last if use_last else cur
             old, new = (prev, fin) if net > 0 else (fin, prev)
-            pano = np.concatenate([without_cursor(old[:HS]), without_cursor(new[:HS])[HS - d:HS]], axis=0)
+            pano = np.concatenate([without_cursor(old[:HS])[TOP:], without_cursor(new[:HS])[HS - d:HS]], axis=0)
             cursor = find_cursor(fin)
-            M = max(M, int(np.ceil(1.18 * d / 32)))
+            # a very long scroll needs more frames so no frame moves more than ~32 px: READ (drop) that many more original
+            # frames instead of inserting new ones. Inserting made the clip longer and shifted every later timestamp.
+            need = int(np.ceil(1.18 * d / 32))
+            while M < need:
+                if read() is None:
+                    break
+                M += 1
             for j in range(1, M):
                 s_ = int(round(d * ease(j / M)))
                 s_ = s_ if net > 0 else d - s_
-                view = pano[s_:s_ + HS].copy()
-                if cursor is not None and cursor[1] + TH <= HS:
+                view = pano[s_:s_ + HS - TOP].copy()
+                if cursor is not None and cursor[1] >= TOP and cursor[1] + TH <= HS:
                     x, y = cursor
-                    view[y:y + TH, x:x + TW] = fin[y:y + TH, x:x + TW]
-                wr.stdin.write(np.concatenate([view, fin[HS:]], axis=0).tobytes())
+                    view[y - TOP:y - TOP + TH, x:x + TW] = fin[y:y + TH, x:x + TW]
+                wr.stdin.write(np.concatenate([fin[:TOP], view, fin[HS:]], axis=0).tobytes())
             wr.stdin.write(last.tobytes())
             prev, gprev = last, small(last)
             continue

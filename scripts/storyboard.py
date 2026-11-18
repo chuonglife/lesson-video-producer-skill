@@ -86,9 +86,11 @@ REVEAL_BY_TYPE = {
 STEPPED_TYPES = {"cards", "big-numbers", "process", "objectives", "compare", "question", "summary", "table", "agenda",
                  "two-column", "chart", "key-message", "closing"}
 # Attention circles drawn automatically when the line that reveals a region carries an emphasis word
-AUTO_CIRCLE_TYPES = {"cards", "process", "objectives", "big-numbers", "table", "compare", "summary", "question"}
+AUTO_CIRCLE_TYPES = {"cards", "process", "objectives", "big-numbers", "table", "compare", "summary", "question", "two-column", "agenda",
+                     "chart", "key-message"}
 EMPHASIS = re.compile(
     r"(?<![\w])(remember|important|never|don't|do not|mistake|the key|key point|must|always|the point|note that|watch out|"
+    r"notice|look at|this one|the answer|only|watch|that is why|this is why|"
     r"careful|critical|essential|crucial|nhớ|quan trọng|đừng|không bao giờ|lỗi|chính là|mấu chốt|lưu ý|cốt lõi|chú ý|"
     r"bắt buộc|tuyệt đối|phải|đáng nhớ|then chốt)(?![\w])", re.I)
 
@@ -237,6 +239,185 @@ def regions_of_slide(shapes, spec, d):
     # 3) reading order: rows, then columns
     items.sort(key=lambda it: (round(it["bbox"][1] / 40), it["bbox"][0]))
     return static, items
+
+
+# ---- Voice-picture sync helpers ------------------------------------------------------------------------------------
+# Transition durations: COPY of TRANS_DUR in assets/engine/video.js. ENTER_SETTLE = rest after the picture has arrived,
+# then the voice starts (the slide enters BEFORE its first line, never together with it).
+TRANS_SECONDS = {"push-left": .68, "fade-up": .6, "iris": .75, "zoom-blur": .7, "diagonal-wipe": .62, "push-up": .62}
+ENTER_SETTLE = 0.4
+MAX_CIRCLES = 3
+STOPWORDS = set("""the a an and or of to in on at for with by from is are was were be been it its this that these those you your i we our they their
+he she his her as but if so not no do does did can will just than then there here what which who how when also into about up out one more all any""".split())
+NUM_WORDS = {str(n): w for n, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen "
+                                              "seventeen eighteen nineteen".split())}
+for _n in range(20, 100):
+    NUM_WORDS[str(_n)] = "_ _ twenty thirty forty fifty sixty seventy eighty ninety".split()[_n // 10]
+
+
+def _tokens(txt):
+    """(set of content words, set of adjacent word pairs) of a text; numbers are spelled, plurals trimmed."""
+    out = []
+    for x in re.findall(r"[\w]+", (txt or "").lower()):
+        x = NUM_WORDS.get(x, x)
+        if len(x) > 3 and x.endswith("s") and not x.endswith("ss"):
+            x = x[:-1]
+        out.append(x)
+    single = {x for x in out if x not in STOPWORDS and (len(x) >= 3 or x.isdigit())}
+    pairs = {f"{a} {b}" for a, b in zip(out, out[1:]) if not (a in STOPWORDS and b in STOPWORDS)}
+    return single, pairs
+
+
+def _mid_sentence(word, sentence):
+    """True when `word` (capitalised) appears in the MIDDLE of a sentence, i.e. it is a proper name, not a sentence start."""
+    for m in re.finditer(r"(?<![\w])" + re.escape(word) + r"(?![\w])", sentence):
+        before = sentence[:m.start()].rstrip()
+        if before and before[-1] not in ".!?":
+            return True
+    return False
+
+
+def match_regions(items, lines, default, first_line=0, ordered=False):
+    """On which narration line each region appears: the FIRST line that mentions the region's own words (rare words weigh more,
+    a pair of words weighs 1.5x); regions with several ideas (a card with a title and bullets) take the first line that clearly
+    mentions ANY of their ideas; a capitalised name or a number that opens an idea counts on its own. A region that no line
+    mentions keeps its even-spread default but never appears before a region that IS mentioned and sits earlier in the slide.
+    ordered=True (process, table rows, numbered lists): a later region never appears before an earlier one, and it only matches
+    lines from the earlier region's line on (a step label "6" would otherwise match the word "six" in the opening sentence)."""
+    import math
+    K, M = len(items), len(lines)
+    if K == 0 or M == 0:
+        return default
+    fractional = any(not isinstance(x, int) for x in default)   # fewer lines than regions: spread over time
+    lt = [_tokens(l) for l in lines]
+    df = {}
+    for a, b in lt:
+        for x in a | b:
+            df[x] = df.get(x, 0) + 1
+    nums = set(NUM_WORDS.values())
+    weight = lambda x: (math.log(1 + M / df.get(x, M)) + 0.3) * (0.3 if (x in nums or x.isdigit()) else 1.0)
+    score = lambda a, b, j: sum(weight(x) for x in a & lt[j][0]) + 1.5 * sum(weight(x) for x in b & lt[j][1])
+    first = []
+    lo = first_line
+    for k, it in enumerate(items):
+        ideas = [x for x in re.split(r"\n| / | · ", it["text"]) if x.strip()] or [it["text"]]
+        table = [[score(*_tokens(x), j) for j in range(M)] for x in ideas]
+        cands = []
+        for x_, row in zip(ideas, table):
+            top = max(row[lo:] or [0])
+            j0 = next((j for j in range(lo, M) if row[j] >= max(math.log(1 + M) + 0.35, 0.6 * top)), None)   # one shared word is not enough
+            m_ = re.match(r"\W*([A-Z][\w]+|\d+)", x_.strip())
+            if m_:
+                t_ = NUM_WORDS.get(m_.group(1), m_.group(1).lower())
+                if m_.group(1).isdigit() or (t_ not in STOPWORDS and len(t_) >= 3 and m_.group(1)[0].isupper()):
+                    one_word = len(re.findall(r"[\w]+", x_)) == 1       # a one-word label ("Next"): the first line that has the word
+                    has = lambda j: (re.search(r"(?<![\w])" + re.escape(t_) + r"(?![\w])", lines[j], re.I) is not None) \
+                        if (m_.group(1).isdigit() or one_word) else (t_ in lt[j][0] and _mid_sentence(m_.group(1), lines[j]))
+                    jr = next((j for j in range(lo, M) if has(j)), None)
+                    if jr is not None and (j0 is None or jr < j0):
+                        j0 = jr
+            if j0 is not None:
+                cands.append(j0)
+        first.append(min(cands) if cands else None)
+        if ordered:
+            if first[-1] is not None:
+                lo = max(lo, first[-1])
+            elif isinstance(default[k], int) and not fractional:
+                lo = max(lo, min(default[k], M - 1))
+    out, floor = [], first_line
+    for k in range(K):
+        if first[k] is not None:
+            out.append(first[k]); floor = max(floor, first[k]) if not fractional else floor
+        else:
+            m = default[k]
+            out.append(m if fractional else max(m, floor) if m < M else M - 1)
+    if ordered:
+        for k in range(1, K):
+            out[k] = max(out[k], out[k - 1])
+    return out
+
+
+def is_ordered(stype, items):
+    """A slide whose regions have a fixed order: process, table rows, numbered lists (3+ regions starting 1, 2, 3...)."""
+    if stype in ("process", "table"):
+        return True
+    nums = [m.group(1) for m in (re.match(r"\s*(\d+)[.)]?(?:\s|$)", it["text"] or "") for it in items) if m]
+    return len(nums) >= 3 and nums == [str(n) for n in range(int(nums[0]), int(nums[0]) + len(nums))]
+
+
+def check_order(sid, stype, when):
+    """Machine check: in an ordered slide a later region must not appear before an earlier one."""
+    for k in range(1, len(when)):
+        if when[k] < when[k - 1]:
+            raise SystemExit(f"SHOW ORDER ERROR: {sid} ({stype}) region {k + 1} appears on line {when[k] + 1:g} before region {k} on line "
+                             f"{when[k - 1] + 1:g}. In an ordered slide a later region never appears before an earlier one; fix the narration "
+                             f"so it mentions them in order, or set \"{sid}\": {{\"order\": false}} in video.json if that is intended.")
+
+
+def cap_per_line(when, M, cap=2, start=0):
+    """closing / question / key-message: at most `cap` regions on the SAME line (the third moves to the next line). The renderer
+    staggers regions of one line by 0.25 s and finishes the last 0.3 s before the voice; too many on one line would finish
+    AFTER the voice."""
+    count, out = {}, list(when)
+    for k in range(start, len(out)):
+        d = out[k]
+        if not isinstance(d, int):
+            continue
+        while count.get(d, 0) >= cap and d < M - 1:
+            d += 1
+        count[d] = count.get(d, 0) + 1
+        out[k] = d
+    return out
+
+
+def split_paragraphs(items, png, M):
+    """One text box holding a whole bullet list is ONE region, so the whole list would appear at once while the voice reads it item by
+    item. Split it into one region per paragraph: measure the real text lines on the slide image (rows with ink), then assign
+    lines to paragraphs by text length. If that does not fit, keep the single region."""
+    try:
+        from PIL import Image
+        import numpy as np
+    except ImportError:
+        return items
+    im = None
+    out = []
+    for it in items:
+        paras = [x for x in it["text"].split("\n") if x.strip()] if len(it["shapes"]) == 1 else []
+        if len(paras) < 3 or M < len(paras):
+            out.append(it); continue
+        if im is None:
+            im = np.asarray(Image.open(png).convert("RGB")).astype(np.int16)
+        x, y, w, h = it["bbox"]
+        crop = im[max(0, y):y + h, max(0, x):x + w]
+        bg = np.median(crop.reshape(-1, 3), 0)
+        ink = (np.abs(crop - bg).max(2) > 60).sum(1) > 2
+        rows, i = [], 0
+        while i < len(ink):
+            if ink[i]:
+                j = i
+                while j + 1 < len(ink) and (ink[j + 1] or (j + 4 < len(ink) and ink[j + 2:j + 5].any())):
+                    j += 1
+                rows.append((i, j)); i = j + 1
+            else:
+                i += 1
+        rows = [r for r in rows if r[1] - r[0] >= 8]
+        n = len(rows)
+        per = None
+        if n == len(paras):
+            per = [1] * n
+        elif n > len(paras):
+            for cpl in range(10, 200):                 # characters per line: find the width that explains the number of lines
+                est = [max(1, -(-len(t) // cpl)) for t in paras]
+                if sum(est) == n:
+                    per = est; break
+        if not per:
+            out.append(it); continue
+        k = 0
+        for t, c in zip(paras, per):
+            a, b = rows[k][0], rows[k + c - 1][1]
+            out.append({"bbox": [x, y + a - 8, w, b - a + 16], "text": t, "shapes": it["shapes"]})
+            k += c
+    return out
 
 
 def long_take_of_slide(sid, ov, out):
@@ -396,6 +577,18 @@ def main():
         n_line += len(lines)
         shapes = [Shape(sh) for sh in pslides[i - 1].shapes]
         static, items = regions_of_slide(shapes, spec, d)
+        if stype in STEPPED_TYPES and stype != "table" and not ov.get("reveal_lines"):
+            items = split_paragraphs(items, png, len(lines))
+        # a clip that covers the whole slide: the slide picture IS the first frame of the edited clip (private areas already masked),
+        # so the transition goes straight into the clip and no placeholder slide flashes before or after it
+        clip_cfg = ov.get("clip") or {}
+        covers_clip = bool(lt_info) and clip_cfg.get("mode", "full") == "full"
+        if covers_clip:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from long_take import first_frame
+            clip_path = clip_cfg["file"] if os.path.isabs(clip_cfg["file"]) else os.path.join(out, clip_cfg["file"])
+            png = str(first_frame(clip_path, lt_info["config"]))
+            items, static = [], []
         transition = None if i == 1 else pick_transition(stype, previous, ov)
         previous = transition or previous
         effect, sound = REVEAL_BY_TYPE.get(stype, ("fade", None))
@@ -420,6 +613,21 @@ def main():
                         when = [0] + [(1 + x) if isinstance(x, int) else round(1 + x, 2) for x in reveal_lines(len(items) - 1, max(1, M - 1))]
                         if M == 1:
                             when = [round(k * 0.6, 2) for k in range(len(items))]
+                    ordered = is_ordered(stype, items) and ov.get("order", True) is not False
+                    if not lt_info:
+                        # each region appears on the FIRST line that mentions it (the voice never talks about a region before it shows)
+                        if stype == "table" and M > 1 and len(items) > 1:
+                            # header row with the first beat; each data row on the line that mentions it
+                            new = [0] + match_regions(items[1:], lines, [min(M - 1, x) for x in reveal_lines(len(items) - 1, M)], 0, ordered)
+                        elif stype in ("question", "key-message", "closing") and M > 1:
+                            new = cap_per_line([0] + match_regions(items[1:], lines, when[1:], 0), M)   # at most 2 regions per line
+                        else:
+                            new = match_regions(items, lines, when, ordered=ordered)
+                        if new != when:
+                            print(f"{sid}: regions appear on the line that mentions them: {[x + 1 if isinstance(x, int) else x for x in when]} -> {[x + 1 for x in new]}")
+                            when = new
+                        if ordered:
+                            check_order(sid, stype, [when[k] if k < len(when) else when[-1] for k in range(len(items))])
                 for k in range(len(items)):
                     actions.append({"kind": "reveal", "region": k, "line": when[min(k, len(when) - 1)], "effect": effect, "sound": sound})
             else:
@@ -434,17 +642,37 @@ def main():
             actions.append({"kind": "circle", "region": ci, "line": M - 1, "after_hold": hold > 0, "sound": "circle",
                             "shape": shape_of(items[ci])})
         elif ov.get("auto_circle", True) and stype in AUTO_CIRCLE_TYPES:
-            count = 0
+            # attention circles: score every region, circle 1-2 per slide (3 when at least 3 lines carry an emphasis word).
+            # Score: emphasis word in the line that reveals it > big number of a big-numbers slide > last row of a table > the region
+            # whose words match the line being read best. A circle is drawn while the voice mentions the region, never ahead of it.
+            scored = []
             for a in [x for x in actions if x["kind"] == "reveal" and isinstance(x["line"], int)]:
-                if count >= 3:
-                    break
-                bb = items[a["region"]]["bbox"]
+                sentence = lines[a["line"]] if a["line"] < len(lines) else ""
+                it = items[a["region"]]
+                bb = it["bbox"]
                 if bb[3] > 260 and bb[2] >= 700:
                     continue  # a tall loose text block: the box would hug empty space
-                if EMPHASIS.search(lines[a["line"]] if a["line"] < len(lines) else ""):
-                    actions.append({"kind": "circle", "region": a["region"], "line": a["line"], "auto": True, "sound": "circle",
-                                    "shape": shape_of(items[a["region"]])})
-                    count += 1
+                if not it["text"].strip() and stype != "big-numbers":
+                    continue  # a picture or empty frame: nothing to circle
+                w1, w2 = _tokens(it["text"])
+                l1, l2 = _tokens(sentence)
+                score = 0.3 * len(w1 & l1) + 0.5 * len(w2 & l2)
+                if EMPHASIS.search(sentence):
+                    score += 3
+                if stype == "big-numbers" and re.search(r"\d", it["text"]):
+                    score += 2
+                if stype == "table" and a["region"] == len(items) - 1 and len(items) > 2:
+                    score += 1.5
+                if score >= 0.6:
+                    scored.append((score, a))
+            emphatic = sum(1 for sc, _ in scored if sc >= 3)
+            one_per_line = {}
+            for sc, a in sorted(scored, key=lambda x: -x[0]):
+                one_per_line.setdefault(a["line"], (sc, a))     # at most one circle per line (two at once is confusing)
+            chosen = sorted(one_per_line.values(), key=lambda x: -x[0])[:max(1, min(MAX_CIRCLES, 2 if emphatic < 3 else 3))] if M >= 2 else []
+            for _sc, a in sorted(chosen, key=lambda x: x[1]["line"]):
+                actions.append({"kind": "circle", "region": a["region"], "line": a["line"], "auto": True, "sound": "circle",
+                                "shape": shape_of(items[a["region"]])})
         zt = ov.get("zoom") if ov.get("zoom") is not None else zoom_target(notes)
         zi = find_region(items, zt) if zt is not None else None
         if zi is not None:
@@ -455,12 +683,18 @@ def main():
         boxes = [s for s in shapes if "Rounded Rectangle" in s.name and s.y >= 1.5 * PX]
         clip_frame = max(boxes, key=lambda s: s.w * s.h).bbox() if boxes else \
             (max(items, key=lambda it: it["bbox"][2] * it["bbox"][3])["bbox"] if items else None)
+        if covers_clip:
+            clip_frame = None
         kb = ov.get("ken_burns")
         out_slides.append({
             "id": sid, "type": stype, "image": os.path.relpath(png, out).replace("\\", "/"),
             "from_line": first_line, "to_line": n_line, "transition": transition,
+            "lead_wait": round(TRANS_SECONDS.get(transition, .65) + ENTER_SETTLE, 2) if transition else None,
+            "covers_clip": covers_clip,
+            # the slide's own message is lost when its frame is replaced by the clip: its label and title show over the start of the clip
+            "clip_label": (" - ".join(x for x in (str(d.get("label") or "").split(" · ")[0].strip(), str(d.get("title") or "").strip()) if x) or None) if covers_clip else None,
             "transition_sound": TRANSITION_SOUND.get(transition) if transition else None,
-            "ken_burns": kb if kb is not None else (stype not in ("question", "table")),
+            "ken_burns": False if covers_clip else kb if kb is not None else (stype not in ("question", "table")),
             "regions": items, "static": [s.bbox() for s in static], "actions": actions, "clip_frame": clip_frame,
             "notes": notes, "summary": str(d.get("title") or d.get("question") or d.get("message") or spec.get("lesson_title") or "")[:60],
         })
@@ -476,7 +710,9 @@ def main():
 
     board = {"file_name": name, "course": spec.get("course"), "lesson_title": spec.get("lesson_title"),
              "lesson_code": spec.get("lesson_code"), "language": spec.get("language", "en"), "theme": spec.get("theme", "navy"),
-             "colors": colors, "cursor": bool((overrides.get("_all") or {}).get("cursor", False)),
+             "colors": colors, "sync": 1,
+             # the teaching pointer is ON by default for English lessons; set video.json "_all": {"cursor": false} to turn it off
+             "cursor": bool((overrides.get("_all") or {}).get("cursor", str(spec.get("language", "en")).lower().startswith("en"))),
              "slides": out_slides, "line_count": n_line}
     with open(os.path.join(out, name + ".narration.txt"), "w", encoding="utf-8") as f:
         f.write("\n".join(lines_all) + "\n")

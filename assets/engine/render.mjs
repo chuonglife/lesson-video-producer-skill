@@ -121,7 +121,8 @@ async function video() {
     const f0 = i === 0 ? 0 : Math.ceil(sl.t0 * fps - 1e-6);
     const f1 = i + 1 < info.slides.length ? Math.ceil(info.slides[i + 1].t0 * fps - 1e-6) : total;
     const s = board.slides[i], p = i > 0 ? board.slides[i - 1] : null;
-    const lines = tl.lines.slice(s.from_line - 1, s.to_line).map(l => [+(l.start - sl.t0).toFixed(3), +(l.end - sl.t0).toFixed(3)]);
+    const lines = tl.lines.slice(s.from_line - 1, s.to_line).map(l => [+(l.start - sl.t0).toFixed(3), +(l.end - sl.t0).toFixed(3),
+      +((l.speech_start ?? l.start) - sl.t0).toFixed(3), +((l.speech_end ?? l.end) - sl.t0).toFixed(3)]);
     const key = full ? null : md5(JSON.stringify({
       engineHash, fps, crf, png: img(s.image), slide: s, lines, cursor: board.cursor === true, colors: board.colors,
       span: +(sl.t1 - sl.t0).toFixed(3), phase: +((f0 / fps) - sl.t0).toFixed(4), first: i === 0,

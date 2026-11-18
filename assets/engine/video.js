@@ -52,8 +52,28 @@
     document.documentElement.style.setProperty('--accent', '#' + (colors.accent || 'FCA311'));
     document.documentElement.style.setProperty('--text', '#' + (colors.text || 'FFFFFF'));
     const starts = tl.lines.map(l => l.start), ends = tl.lines.map(l => l.end);
+    // speech/stop: seconds the voice REALLY starts / stops inside a line (make_voice.py measures them and ignores the silence at both
+    // ends of the voice file); an older timeline without them falls back to start/end
+    const speech = tl.lines.map(l => l.speech_start ?? l.start), stop = tl.lines.map(l => l.speech_end ?? l.end);
     const duration = tl.duration || (ends[ends.length - 1] + 1);
     if (board.line_count !== tl.lines.length) throw new Error(`timeline has ${tl.lines.length} lines, storyboard has ${board.line_count}`);
+
+    // VOICE-PICTURE SYNC (storyboard "sync": 1, written by storyboard.py): the slide starts its transition BEFORE its first line, so the
+    // picture has arrived and settled (lead_wait = transition + ENTER) when the voice starts; it never changes while the voice or
+    // the countdown of the previous slide is still running. A region finishes appearing REGION_LEAD seconds BEFORE the line that
+    // mentions it. Without "sync" (an old storyboard) the slide changes exactly when its first line starts, as before.
+    const SYNC = !!board.sync, ENTER = .4, REGION_LEAD = .3;
+    const T0 = board.slides.map((s, i) => {
+      if (i === 0) return 0;
+      if (!SYNC) return starts[s.from_line - 1];
+      const p = board.slides[i - 1];
+      let free = stop[p.to_line - 1] + .12;
+      const cdn = (p.actions || []).find(a => a.kind === 'countdown');
+      if (cdn) free = Math.max(free, ends[p.from_line - 1 + clamp(cdn.line, 0, p.to_line - p.from_line)] + .15 + cdn.seconds + .3);
+      const late = speech[s.from_line - 1] - (s.lead_wait ?? ((TRANS_DUR[s.transition] || .65) + ENTER));
+      return Math.min(speech[s.from_line - 1] - .05, Math.max(free, late));
+    });
+    const revealInfo = [];
 
     // ---- build every slide ----
     const slides = [];
@@ -62,8 +82,9 @@
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     for (let i = 0; i < board.slides.length; i++) {
       const s = board.slides[i];
-      const t0 = i === 0 ? 0 : starts[s.from_line - 1];
-      const t1 = i + 1 < board.slides.length ? starts[board.slides[i + 1].from_line - 1] : duration;
+      const t0 = T0[i];
+      const t1 = i + 1 < board.slides.length ? T0[i + 1] : duration;
+      const trd = i === 0 ? 0 : (TRANS_DUR[s.transition || 'fade-up'] || .65);
       const el = document.createElement('div'); el.className = 'slide'; el.dataset.id = s.id;
       const kb = document.createElement('div'); kb.className = 'kb';
       const src = base + s.image;
@@ -105,17 +126,33 @@
         if (a.kind === 'reveal') {
           const c = chips[a.region]; if (!c) return;
           let T = lineStart(a.line) + (a.stagger || 0) * STAGGER;
-          if (i === 0 && a.line === 0) T = .02 + (a.stagger || 0) * .18;   // title slide: show at once so frame 0 is not empty
-          if (i > 0 && Number.isInteger(a.line) && a.line === 0 && !a.stagger && nReveals > 1) T += .35;  // wait for the transition to settle
-          if (i > 0 && a.stagger !== undefined) T = Math.max(T, t0 + .45 + a.stagger * STAGGER);
+          let li = null;
           const kind = a.effect || 'fade';
+          if (SYNC && i > 0 && Number.isInteger(a.line) && a.stagger === undefined) {
+            // the region FINISHES appearing before the voice mentions it; several regions on one line are staggered by 0.25 s and the
+            // LAST one finishes REGION_LEAD before the voice; never earlier than the previous line's end / the slide's entrance
+            const d = clamp(a.line, 0, M - 1);
+            li = s.from_line - 1 + d;
+            const same = s.actions.filter(x => x.kind === 'reveal' && Number.isInteger(x.line) && x.stagger === undefined && clamp(x.line, 0, M - 1) === d);
+            const n = same.length, k = same.indexOf(a);
+            const floor = d === 0 ? t0 + Math.min(.15, trd * .25) : Math.max(t0 + trd * .6, stop[li - 1] - .25);
+            T = speech[li] - REGION_LEAD - (REVEAL_DUR[kind] || .55) - (n - 1 - k) * .25;
+            if (T < floor + k * .12) T = floor + k * .12;
+          } else {
+            if (i === 0 && a.line === 0) T = .02 + (a.stagger || 0) * .18;   // title slide: show at once so frame 0 is not empty
+            if (i > 0 && Number.isInteger(a.line) && a.line === 0 && !a.stagger && nReveals > 1) T += .35;  // wait for the transition to settle
+            if (i > 0 && a.stagger !== undefined) T = Math.max(T, t0 + (SYNC ? trd * .6 : .45) + a.stagger * STAGGER);
+            if (Number.isInteger(a.line) && a.stagger === undefined) li = s.from_line - 1 + clamp(a.line, 0, M - 1);
+          }
           reveals.push({ c, T, kind, dur: REVEAL_DUR[kind] || .55 });
+          revealInfo.push({ id: s.id, region: a.region + 1, T: +T.toFixed(3), done: +(T + (REVEAL_DUR[kind] || .55)).toFixed(3), line: li });
           if (a.sound) events.push({ t: +(T + .03).toFixed(3), sound: a.sound, what: `${s.id} reveal region ${a.region + 1}` });
         } else if (a.kind === 'circle') {
           const c = chips[a.region]; if (!c) return;
           // when: right after the countdown for an answer, 1 s after the region appears for an automatic circle, else at the line
           let A = a.after_hold ? lineEnd(a.line) + ((s.actions.find(x => x.kind === 'countdown') || {}).seconds || 0) + .1
-            : a.auto ? lineStart(a.line) + 1.0 : lineStart(a.line) + .15;
+            : a.auto ? (SYNC && Number.isInteger(a.line) ? speech[s.from_line - 1 + clamp(a.line, 0, M - 1)] + .5 : lineStart(a.line) + 1.0)
+              : (SYNC && Number.isInteger(a.line) ? speech[s.from_line - 1 + clamp(a.line, 0, M - 1)] + .1 : lineStart(a.line) + .15);
           A = Math.min(A, t1 - 1.0);
           const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
           let d, L;
@@ -148,7 +185,7 @@
           let end = t1;
           if (a.auto) {
             const next = reveals.map(x => x.T).filter(T => T > A + .5).sort((x, y) => x - y)[0];
-            end = Math.min(t1 - .2, A + 3.5, next !== undefined ? next - .15 : 1e9);
+            end = Math.min(t1 - .2, A + 3.5, next !== undefined ? Math.max(A + 2.2, next - .15) : 1e9);   // stays at least 2.2 s (no flicker)
           }
           circles.push({ el: p, A, L, dur: a.shape === 'ellipse' ? .9 : .75, end, c });
           events.push({ t: +A.toFixed(3), sound: a.sound || 'circle', what: `${s.id} circle region ${a.region + 1}${a.auto ? ' (auto)' : ''}` });
@@ -165,7 +202,7 @@
       if (i > 0 && s.transition_sound) events.push({ t: +(t0 - .06).toFixed(3), sound: s.transition_sound, what: `transition to ${s.id} (${s.transition})` });
       // Ken Burns: a very slow push on long slides, anchored at the bottom so the footer is never cropped
       const kbX = [.35, .65, .5, .4][i % 4];
-      // pointer marks (only when the storyboard enables the cursor; off by default because viewers read it as a stray mouse)
+      // pointer marks (when the storyboard enables the cursor; storyboard.py turns it on by default for English lessons)
       const marks = [];
       const CURSOR = board.cursor === true;
       if (CURSOR && new Set(reveals.map(r => Math.round(r.T * 10))).size >= 2 && !['title', 'section', 'key-message', 'closing'].includes(s.type))
@@ -339,7 +376,9 @@
     }
 
     window.__render = render;
-    window.__info = { duration, slides: slides.map(x => ({ id: x.s.id, t0: x.t0, t1: x.t1 })), events: events.sort((a, b) => a.t - b.t) };
+    window.__info = { duration, sync: SYNC, slides: slides.map(x => ({ id: x.s.id, t0: x.t0, t1: x.t1,
+        entered: +(x.t0 + (x.i === 0 ? 0 : (TRANS_DUR[x.s.transition || 'fade-up'] || .65))).toFixed(3), circles: x.circles.length, cursor_marks: x.marks.length })),
+      reveals: revealInfo, events: events.sort((a, b) => a.t - b.t) };
     if (Q.get('mode') === 'render' || window.__DATA_FROM_RENDERER) { stage.style.transform = 'none'; window.__ready = true; render(0); return; }
 
     // ---- interactive preview in a browser ----

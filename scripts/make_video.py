@@ -57,7 +57,7 @@ def duration(p):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("slides")
-    ap.add_argument("--lang")
+    ap.add_argument("--lang", help="optional; must match \"language\" in slides.json, which is used when omitted")
     ap.add_argument("--engine", choices=["kokoro", "vieneu", "edge", "files"])
     ap.add_argument("--voice")
     ap.add_argument("--no-music", action="store_true")
@@ -75,7 +75,11 @@ def main():
     src = Path(a.slides).resolve()
     spec = json.loads(src.read_text(encoding="utf-8"))
     name = spec.get("file_name") or spec.get("ten_tep") or src.stem
-    lang = a.lang or spec.get("language") or "en"
+    spec_lang = spec.get("language") or "en"
+    if a.lang and a.lang != spec_lang:
+        raise SystemExit(f"--lang {a.lang} differs from \"language\": \"{spec_lang}\" in {src.name}: drop the option or fix slides.json "
+                         "(the deck, the narration and the voice must be the same language)")
+    lang = a.lang or spec_lang   # no option: the language comes from slides.json
     parts = list(src.parent.parts)
     out = Path(*[("videos" if p == "slides" else p) for p in parts]) if "slides" in parts else src.parent / "video"
     out.mkdir(parents=True, exist_ok=True)
@@ -168,7 +172,7 @@ def main():
         run([py, HERE / "composite_clips.py", board, tl, overrides, base, final], "7/9 screen recordings")
     if a.from_step <= 8:
         run([py, HERE / "make_subtitles.py", tl, out / f"{name}.{lang}"], "8/9 subtitles")
-    run([py, HERE / "check_video.py", final, "--timeline", tl, "--events", events], "9/9 final check")
+    run([py, HERE / "check_video.py", final, "--timeline", tl, "--events", events, "--storyboard", board], "9/9 final check")
     print(f"\nDONE: {final}\nLook at {check}/contact-*.png, report: {check}/{name}.report.md")
 
 

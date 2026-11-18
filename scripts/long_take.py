@@ -11,8 +11,10 @@ Usage:
                                          [--mode fast|cut] [--language en|vi] [--overwrite]
       -> <clip>.longtake.json   the config (a draft: segments, waits, zoom suggestions; the writer fills "narration")
          <clip>.action-table.md + .action-table-NN.png   the action table: times, events, waits, key frames
-  python long_take.py render <clip.mp4> <out.mp4> [--config <longtake.json>] [--group-seconds 12.5,30,8]
+  python long_take.py render <clip.mp4> <out.mp4> [--config <longtake.json>] [--group-seconds 12.5,30,8] [--stage-label "Step 2"]
       a test render of the edited clip (without --group-seconds each group gets its preferred length) + <out>.metrics.json
+  python long_take.py first-frame <clip.mp4> [--config <longtake.json>]
+      writes and prints the path of the FIRST FRAME of the edited clip (letterboxed 1920x1080, masks applied)
   python long_take.py fit <storyboard.json> <timeline.json> <video.json>
       called by make_video.py after the voice step: a group whose picture cannot shrink to its narration gets
       "pause_after" added to the config; exit code 3 means "changed, run the voice again"
@@ -25,21 +27,29 @@ In video.json (the slide should be an "image" slide whose picture is the clip's 
 
 The config <clip>.longtake.json (seconds are seconds of the ORIGINAL clip, read them from the action table):
   "waits":  [{"from": 20.4, "to": 81.2, "mode": "fast"}]        "fast" (fast-forward, "8x speed" label) | "cut" ("4 min later")
-  "wait_defaults": {"mode": "fast", "speed": 8, "max_speed": 16, "min_speed": 2, "keep_head": 1, "keep_tail": 1, "cut_seconds": 1.6}
+  "wait_defaults": {"mode": "fast", "speed": 8, "max_speed": 16, "min_speed": 2, "keep_head": 1, "keep_tail": 1, "cut_seconds": 2.4}
   "segments": [{"from": 0, "to": 20.4, "narration": "First line.\\nSecond line.", "pause_after": 0}]
           a segment with narration opens a GROUP; a segment without narration joins the group before it. The narration
           starts exactly when the picture of its group starts. "reading": true marks a result-review segment (never a wait).
   "zoom": [{"from": 3, "to": 18, "box": [x, y, w, h], "ease": 0.8}]   pixels of the original clip, widened to 16:9;
           in, out and the pan between two neighbouring boxes follow a slow-fast-slow curve over "ease" seconds of output
-  "masks": [{"from": 0, "to": 12, "box": [x, y, w, h], "kind": "solid" | "blur"}]   privacy masks (record_actions.py writes them)
+  "masks": [{"from": 0, "to": 12, "box": [x, y, w, h], "kind": "solid" | "blur" | "bg"}]   privacy masks (record_actions.py writes them);
+          "bg" paints the terminal background colour with no border (for an obstacle such as an OS dialog)
+  "callouts": [{"from": 40, "to": 45, "box": [x, y, w, h]}]   an accent frame drawn around a region (original clip pixels, seconds of the
+          original clip). Not written: every reading segment gets an automatic frame around the text that appeared in the 6 s before it
+          (too big or too small regions are skipped); "auto_callouts": false switches the automatic ones off
   "highlight": {"clicks": true, "keys": true, "hide_typing": true}   hide_typing: never show typed text, only key combos
   "inserts": [{"after": 72.6, "file": "D:/demo-course/program.docx", "pages": [1, 2], "narration": "..."}]
           the REAL ARTIFACT shown right after a result: a document, text file, deck, image or video built from the file
           itself (no extra recording), with an "Opening: <file>" label; see insert_artifacts.py for every field
 Fitting narration and picture, group by group: narration longer than the picture -> the fast-forward slows down (never
 below min_speed) and then the last frame holds; narration shorter -> waits shrink (fast-forward up to max_speed, a cut down
-to 0.8 s), then action pieces speed up by at most 1.25x; still too long -> "fit" adds pause_after so the picture can run.
+to 2 s), then action pieces speed up by at most 1.25x; still too long -> "fit" adds pause_after so the picture can run.
 A piece with on-screen actions is NEVER faster than 1.25x.
+No flicker (a scene = the picture between two changes of picture): a cut is never under 2 s, the core of a wait under 3 s is played
+normally (no fast-forward, no cut), a fast-forward is never under 1.5 s, and an action fragment under 1.5 s squeezed between a
+cut / fast-forward / insert / the clip edge is merged into its neighbour. The label "N min later" becomes "N hours later" from 90 minutes.
+render(..., stage_label="Step 2") shows a pill at the top for the first 3.8 s of the clip.
 """
 import argparse
 import bisect
@@ -58,15 +68,23 @@ except Exception:
     pass
 HERE = Path(__file__).resolve().parent
 
-WAIT_DEFAULTS = {"mode": "fast", "speed": 8, "max_speed": 16, "min_speed": 2, "keep_head": 1.0, "keep_tail": 1.0, "cut_seconds": 1.6}
+WAIT_DEFAULTS = {"mode": "fast", "speed": 8, "max_speed": 16, "min_speed": 2, "keep_head": 1.0, "keep_tail": 1.0, "cut_seconds": 2.4}
 DETECT_DEFAULTS = {"threshold": 0.004, "min_wait": 4.0, "allow_blips": 1.0}
 HIGHLIGHT_DEFAULTS = {"clicks": True, "keys": True, "hide_typing": True}
 ACTION_FASTEST = 0.8          # output length / source length of an action piece: 0.8 = 1.25x faster (the old rule)
-CUT_MIN, CUT_MAX = 0.8, 3.0
+# SHORT SCENES (a cut shrunk to 0.8 s made its label flash and vanish): a cut is never under CUT_MIN, a wait core under
+# WAIT_CORE_MIN is not fast-forwarded or cut, a fast-forward is never under FAST_MIN, an action fragment under CRUMB seconds that is
+# squeezed between a cut / fast-forward / insert / the clip edge is merged into its neighbour (no 1 s flash of a screen).
+CUT_MIN, CUT_MAX = 2.0, 3.0
+WAIT_CORE_MIN = 3.0
+FAST_MIN = 1.5
+CRUMB = 1.5
+SCENE_MIN = 1.5               # machine check: a scene (between two changes of picture) shorter than this is a defect
+GROUP_LEAD = 0.4              # the picture of a narration group changes this many seconds before its voice starts (seconds)
 ZOOM_MAX = 3.0
 OUT_W, OUT_H, FPS = 1920, 1080, 30
-LABELS = {"en": {"min": "{n} min later", "sec": "{n} sec later", "fast": "{x}× speed  »"},
-          "vi": {"min": "{n} phút sau", "sec": "{n} giây sau", "fast": "Tua {x}×  »"}}
+LABELS = {"en": {"hour": "{n} hours later", "min": "{n} min later", "sec": "{n} sec later", "fast": "{x}× speed  »"},
+          "vi": {"hour": "{n} giờ sau", "min": "{n} phút sau", "sec": "{n} giây sau", "fast": "Tua {x}×  »"}}
 ACCENT = (252, 163, 17)       # the accent of the dark-blue theme (RGB)
 LABEL_BG = (20, 33, 61)
 FONTS = ["C:/Windows/Fonts/seguisb.ttf", "C:/Windows/Fonts/segoeui.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -116,6 +134,8 @@ def read_config(p):
 
 def cut_label(sec, lang):
     b = LABELS.get(lang, LABELS["en"])
+    if sec >= 5400:      # from 90 minutes: "3.5 hours later" (rounded to half an hour)
+        return b["hour"].format(n="%g" % (round(sec / 1800) / 2))
     return b["min"].format(n=max(1, round(sec / 60))) if sec >= 90 else b["sec"].format(n=max(5, int(round(sec / 5)) * 5))
 
 
@@ -158,7 +178,7 @@ def pieces_of_segment(cfg, d):
             continue
         c0 = wa + (float(wd["keep_head"]) if w["from"] >= a - 1e-6 else 0)
         c1 = wb - (float(wd["keep_tail"]) if w["to"] <= b + 1e-6 else 0)
-        if c1 - c0 < 1.0:
+        if c1 - c0 < WAIT_CORE_MIN:      # too short to fast-forward or cut: it plays at normal speed inside the action piece
             continue
         if c0 > cur:
             out.append({"kind": "act", "s0": cur, "s1": c0})
@@ -180,9 +200,11 @@ def fit_group(pieces, D, wd):
             g = m["r"].seconds
             m["pref"], m["lo"], m["hi"] = g, (g if m["r"].fixed else max(min(2.0, g), g * 0.7)), g
         elif m["mode"] == "cut":
-            m["pref"], m["lo"], m["hi"] = float(wd["cut_seconds"]), CUT_MIN, CUT_MAX
+            pref = max(CUT_MIN, float(wd["cut_seconds"]))      # an old config with cut_seconds 1.6 still gives >= 2 s
+            m["pref"], m["lo"], m["hi"] = pref, CUT_MIN, max(CUT_MAX, pref)
         else:
-            m["pref"], m["lo"], m["hi"] = L / sp, L / smax, L / smin
+            lo = max(L / smax, min(FAST_MIN, L / smin))
+            m["pref"], m["lo"], m["hi"] = max(L / sp, lo), lo, L / smin
         m["out"] = m["pref"]
     P = sum(m["pref"] for m in pieces)
     hold, short = 0.0, 0.0
@@ -210,15 +232,68 @@ def fit_group(pieces, D, wd):
     return pieces, hold, short
 
 
+def merge_crumbs(grouped):
+    """Action crumbs: a run of 'act' pieces shorter than CRUMB seconds in all, whose two ends are both a change of picture (cut,
+    fast-forward, insert, clip edge) -> drop the crumb and add its output length (and source seconds) to the neighbouring wait or insert
+    of the same group. The length of the group stays the same. grouped: [(k, D, pieces, hold, short)], changed in place."""
+    flat = [(k, m) for k, D, pieces, hold, short in grouped for m in pieces]
+    hard = lambda m: m is None or m["kind"] in ("wait", "insert")
+    drop = set()
+    i = 0
+    while i < len(flat):
+        if flat[i][1]["kind"] != "act":
+            i += 1; continue
+        j = i
+        while j + 1 < len(flat) and flat[j + 1][1]["kind"] == "act" and flat[j + 1][0] == flat[i][0]:
+            j += 1
+        run = [flat[x][1] for x in range(i, j + 1)]
+        out = sum(m["out"] for m in run)
+        before = flat[i - 1] if i > 0 else None
+        after = flat[j + 1] if j + 1 < len(flat) else None
+        soft_before = before is not None and before[1]["kind"] == "act"    # an act of another group next to it is a seamless join
+        soft_after = after is not None and after[1]["kind"] == "act"
+        k = flat[i][0]
+        near = [x for x in (after, before) if x is not None and x[0] == k and x[1]["kind"] in ("wait", "insert")]
+        if out < CRUMB and not soft_before and not soft_after and hard(before and before[1]) and hard(after and after[1]) and near:
+            target = (sorted(near, key=lambda x: x[1]["kind"] != "wait")[0])[1]
+            if target["kind"] == "wait":
+                if target is (after and after[1]):
+                    target["s0"] = run[0]["s0"]
+                else:
+                    target["s1"] = run[-1]["s1"]
+            target["out"] += out
+            drop |= {id(m) for m in run}
+        i = j + 1
+    for x in range(len(grouped)):
+        k, D, pieces, hold, short = grouped[x]
+        grouped[x] = (k, D, [m for m in pieces if id(m) not in drop], hold, short)
+
+
+def scenes(plan):
+    """The scenes (between two changes of picture) in output seconds: normal action (act + hold side by side), cut, fast, insert."""
+    sc = []
+    for m in plan:
+        k = "cut" if m.get("mode") == "cut" and m["kind"] == "wait" else "fast" if m["kind"] == "wait" else "insert" if m["kind"] == "insert" else "normal"
+        if sc and sc[-1]["kind"] == k == "normal":
+            sc[-1]["out_to"] = round(m["o1"], 2)
+        else:
+            sc.append({"kind": k, "out_from": round(m["o0"], 2), "out_to": round(m["o1"], 2)})
+    return sc
+
+
 def schedule(cfg, group_seconds=None):
     """The whole clip as ordered pieces with o0/o1 (output seconds). group_seconds: the wanted output length of each group."""
     gs = narration_groups(cfg)
     wd = cfg["wait_defaults"]
     plan, report, o = [], [], 0.0
+    fitted = []
     for k, g in enumerate(gs):
         pieces = [m for i in g["segments"] for m in pieces_of_segment(cfg, cfg["segments"][i])]
         D = group_seconds[k] if group_seconds and k < len(group_seconds) else None
-        pieces, hold, short = fit_group(pieces, D, wd)
+        fitted.append((k, D) + fit_group(pieces, D, wd))
+    merge_crumbs(fitted)
+    for k, D, pieces, hold, short in fitted:
+        g = gs[k]
         o_group = o
         if hold > 1e-3 and any(m["kind"] == "insert" for m in pieces):   # a group with an insert stretches the insert (slower scroll)
             [m for m in pieces if m["kind"] == "insert"][-1]["out"] += hold   # instead of holding the source frame
@@ -589,7 +664,9 @@ def apply_masks(f, masks, s):
             x0, y0, x1, y1 = max(0, int(x)), max(0, int(y)), min(W, int(x + w)), min(H, int(y + h))
             if x1 <= x0 or y1 <= y0:
                 continue
-            if kind == "blur":
+            if kind == "bg":      # the terminal background colour, no border (an obstacle such as an OS dialog got into the frame)
+                cv2.rectangle(out, (x0, y0), (x1 - 1, y1 - 1), (8, 8, 8), -1)
+            elif kind == "blur":
                 roi = out[y0:y1, x0:x1]
                 small = cv2.resize(roi, (max(1, (x1 - x0) // 12), max(1, (y1 - y0) // 12)), interpolation=cv2.INTER_AREA)
                 out[y0:y1, x0:x1] = cv2.GaussianBlur(cv2.resize(small, (x1 - x0, y1 - y0), interpolation=cv2.INTER_LINEAR), (0, 0), 6)
@@ -597,6 +674,108 @@ def apply_masks(f, masks, s):
                 cv2.rectangle(out, (x0, y0), (x1 - 1, y1 - 1), (61, 33, 20), -1)
                 cv2.rectangle(out, (x0, y0), (x1 - 1, y1 - 1), ACCENT[::-1], 2)
     return f if out is None else out
+
+
+def first_frame(clip, cfg_path):
+    """The FIRST FRAME of the edited clip exactly as render() draws it (letterboxed 1920x1080, private areas masked) ->
+    <clip folder>/_longtake/<clip>.first.png. The storyboard uses it as the picture of a slide that the full-screen clip covers, so
+    the transition goes straight from the previous slide into the clip (no placeholder slide shows). Cached by hash; returns the path."""
+    import cv2
+    clip = Path(clip)
+    out = clip.parent / "_longtake" / f"{clip.stem}.first.png"
+    cfg = read_config(cfg_path)
+    s0 = cfg["segments"][0]["from"] if cfg["segments"] else 0.0
+    key = hashlib.md5(json.dumps([cfg.get("masks"), s0, clip.stat().st_size, clip.stat().st_mtime_ns], sort_keys=True).encode()).hexdigest()[:10]
+    stamp = out.with_suffix(".txt")
+    if out.is_file() and stamp.is_file() and stamp.read_text(encoding="utf-8") == key:
+        return out
+    W, H, _, _ = probe(clip)
+    f = Reader(clip).at(s0)
+    masks = [(c["from"], c["to"], c["box"], c.get("kind", "solid")) for c in cfg["masks"]]
+    f = apply_masks(f, masks, s0)
+    k0 = min(OUT_W / W, OUT_H / H); ox, oy = (OUT_W - W * k0) / 2, (OUT_H - H * k0) / 2
+    img = cv2.warpAffine(f, np.float32([[k0, 0, ox], [0, k0, oy]]), (OUT_W, OUT_H), borderValue=(0, 0, 0))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out), img)
+    stamp.write_text(key, encoding="utf-8")
+    return out
+
+
+def callouts_of_clip(clip, cfg, W, H):
+    """Accent frames in the long take, in ORIGINAL seconds: [(s_from, s_to, [x, y, w, h])].
+    "callouts": [{"from", "to", "box"}] in the config is used as written. Not written (and "auto_callouts" not false): every READING
+    segment gets a frame around the text that appeared in the 6 s before it (the result Claude Code just printed); a region that is too
+    big (the whole screen scrolled) or too small is skipped."""
+    import cv2
+    if cfg.get("callouts") is not None:
+        return [(float(k["from"]), float(k["to"]), k["box"]) for k in cfg["callouts"]]
+    if cfg.get("auto_callouts") is False:
+        return []
+    out = []
+    rd = None
+    for d in cfg["segments"]:
+        if not d.get("reading") or d.get("insert") is not None:
+            continue
+        t = float(d["from"]) + 0.3
+        if rd is None:
+            rd = cv2.VideoCapture(str(clip))
+        pics = []
+        for s in (max(0.0, t - 6.0), t):
+            rd.set(cv2.CAP_PROP_POS_MSEC, s * 1000)
+            ok, f = rd.read()
+            if not ok:
+                break
+            pics.append(cv2.cvtColor(cv2.resize(f, (480, int(480 * H / W))), cv2.COLOR_BGR2GRAY).astype(np.int16))
+        if len(pics) < 2:
+            continue
+        m = (np.abs(pics[1] - pics[0]) > 28).astype(np.uint8)
+        h_ = m.shape[0]
+        m[int(h_ * 0.86):] = 0          # the bottom strip: the prompt box and the status line, always changing
+        m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+        if m.sum() < 40:
+            continue
+        ys, xs = np.nonzero(m)
+        sx = W / 480
+        x0, x1 = np.percentile(xs, 2) * sx, (np.percentile(xs, 98) + 1) * sx
+        y0, y1 = np.percentile(ys, 2) * sx, (np.percentile(ys, 98) + 1) * sx
+        # follow the real LINES of text in the last frame: grow up and down to a blank line, left and right to the text edge (never cut a line)
+        rd.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        ok, f = rd.read()
+        if not ok:
+            continue
+        g = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY).astype(np.int16)
+        ink = np.abs(g - int(np.median(g))) > 60
+        rows = ink.any(1)
+        y0, y1 = int(y0), min(int(y1), int(H * 0.86) - 1)
+        blank = lambda y: not rows[max(0, y - 5):y + 6].any()
+        while y0 > 0 and not blank(y0):
+            y0 -= 1
+        while y1 < int(H * 0.86) - 1 and not blank(y1):
+            y1 += 1
+        cols = np.nonzero(ink[y0:y1 + 1].any(0))[0]
+        if len(cols) < 2:
+            continue
+        x0, x1 = float(cols[0]), float(cols[-1] + 1)
+        share = (x1 - x0) * (y1 - y0) / (W * H)
+        if share > 0.45 or share < 0.01:
+            continue
+        out.append((t + 0.3, min(float(d["to"]), t + 5.0), [round(x0 - 14), round(y0 - 10), round(x1 - x0 + 28), round(y1 - y0 + 20)]))
+    return out
+
+
+def draw_callout(frame, x, y, w, h, u, alpha=1.0):
+    """A rounded frame drawn along its outline (u 0..1), accent colour, 6 px thick."""
+    import cv2
+    r = int(min(28, h / 2, w / 2))
+    pts = []
+    for (cx, cy, a0) in ((x + w - r, y + r, -90), (x + w - r, y + h - r, 0), (x + r, y + h - r, 90), (x + r, y + r, 180)):
+        for a in range(a0, a0 + 91, 10):
+            pts.append((cx + r * math.cos(math.radians(a)), cy + r * math.sin(math.radians(a))))
+    pts.append(pts[0])
+    n = max(2, int(len(pts) * ease(u)))
+    layer = frame.copy()
+    cv2.polylines(layer, [np.int32(pts[:n])], False, ACCENT[::-1], 6, cv2.LINE_AA)
+    cv2.addWeighted(layer, alpha, frame, 1 - alpha, 0, dst=frame)
 
 
 def key_labels(ev, plan, hl):
@@ -628,7 +807,7 @@ def key_labels(ev, plan, hl):
     return [(a, b, t) for a, b, t, _ in out if b - a > 0.05]
 
 
-def render(clip, cfg_p, out_path, group_seconds=None):
+def render(clip, cfg_p, out_path, group_seconds=None, stage_label=None):
     import cv2
     clip, out_path = Path(clip), Path(out_path)
     cfg = read_config(cfg_p)
@@ -663,6 +842,14 @@ def render(clip, cfg_p, out_path, group_seconds=None):
                 if o is not None:
                     clicks.append((o, e["x"] * k0 + ox, e["y"] * k0 + oy))
     keys = key_labels(ev, plan, hl) if hl["keys"] else []
+    callouts = []
+    for a_, b_, (x_, y_, w_, h_) in callouts_of_clip(clip, cfg, W, H):
+        oa, ob = source_to_out(plan, a_), source_to_out(plan, b_)
+        if oa is None:
+            continue
+        if ob is None or ob < oa + 2.2:
+            ob = oa + 3.0
+        callouts.append((oa, ob, x_ * k0 + ox, y_ * k0 + oy, w_ * k0, h_ * k0))
     wait_labels = []
     for m in plan:
         if m["kind"] == "wait":
@@ -728,10 +915,18 @@ def render(clip, cfg_p, out_path, group_seconds=None):
         for o, x, y in clicks:
             if 0 <= t - o < 0.6:
                 click_ripple(out, (x - zx) * sc, (y - zy) * sc, (t - o) / 0.6)
+        for oa, ob, x, y, w, h in callouts:
+            if oa <= t < ob + 0.35:
+                draw_callout(out, (x - zx) * sc, (y - zy) * sc, w * sc, h * sc, (t - oa) / 0.7, 1.0 if t < ob else 1 - (t - ob) / 0.35)
         for a, b, txt in keys:
             if a <= t < b:
                 lb = label_image(txt, 40)
                 paste(out, lb, OUT_W - lb[0].shape[1] - 48, OUT_H - lb[0].shape[0] - 48, min(1.0, (t - a) / 0.15, (b - t) / 0.25))
+        if stage_label and t < 3.8:      # the stage label, top centre, for the first 3.8 s of the clip
+            lb = label_image(stage_label, 46)
+            al = min(1.0, (t - 0.15) / 0.3, (3.8 - t) / 0.4)
+            if al > 0:
+                paste(out, lb, (OUT_W - lb[0].shape[1]) / 2, 64, al)
         for a, b, txt, where in wait_labels:
             if a <= t < b:
                 lb = label_image(txt, 44 if where == "mid" else 36)
@@ -763,7 +958,7 @@ def render(clip, cfg_p, out_path, group_seconds=None):
                "hold_s": round(sum(m["o1"] - m["o0"] for m in plan if m["kind"] == "hold"), 1),
                "zoom": len(zooms), "zoom_max": round(zoom_max, 2), "zoom_step_max_px": round(step_max, 1), "zoom_jerk_max_px": round(jerk_max, 1),
                "clicks": len(clicks), "key_labels": len(keys), "hide_typing": bool(hl["hide_typing"]), "masks": len(masks),
-               "groups": report,
+               "groups": report, "scenes": scenes(plan), "callouts": len(callouts),
                "skip_jumps": [[round(m["o0"] - 0.2, 2), round(m["o1"] + 0.2, 2)] for m in cuts + fasts]}
     if inserts:      # only when there are inserts, so a long take without them writes the same metrics as before
         metrics["inserts"] = [{"out_from": round(m["o0"], 2), "out_to": round(m["o1"], 2), "file": m["r"].file.name, "kind": m["r"].kind} for m in inserts]
@@ -774,7 +969,7 @@ def render(clip, cfg_p, out_path, group_seconds=None):
     print(f"rendered {out_path.name}: source {length:.1f} s -> {metrics['out_s']:.1f} s; {metrics['cuts']} cuts ({metrics['cut_s']} s), "
           f"{len(fasts)} fast-forwards (saved {metrics['fast_saved_s']} s), held {metrics['hold_s']} s, {len(zooms)} zoom boxes "
           f"(max {zoom_max:.2f}x, step {step_max:.1f} px/frame, jerk {jerk_max:.1f} px/frame²), {len(clicks)} clicks, {len(keys)} key labels, "
-          f"{len(masks)} masks, {len(inserts)} artifact inserts; fastest action piece {metrics['action_fastest']}x")
+          f"{len(callouts)} callouts, {len(masks)} masks, {len(inserts)} artifact inserts; fastest action piece {metrics['action_fastest']}x")
     for b in report:
         if b["short"] > 0.05:
             print(f"WARNING group {b['group']}: the picture is still {b['short']} s longer than the narration at full squeeze; "
@@ -803,24 +998,24 @@ def render_for_slide(sl, c, root, starts, t_in, t_out):
     h = hashlib.md5()
     for x in (json.dumps(cfg, sort_keys=True, ensure_ascii=False), ",".join(f"{d:.3f}" for d in D), f"{clip.stat().st_size}:{clip.stat().st_mtime_ns}",
               ev_p.read_text(encoding="utf-8") if ev_p and ev_p.is_file() else "", __import__("insert_artifacts").fingerprint(cfg),
-              Path(__file__).read_text(encoding="utf-8")):
+              Path(__file__).read_text(encoding="utf-8"), sl.get("clip_label") or ""):
         h.update(x.encode("utf-8"))
     out = clip.parent / "_longtake" / f"{clip.stem}-{h.hexdigest()[:10]}.mp4"
     mp = Path(str(out) + ".metrics.json")
     if out.is_file() and mp.is_file():
         print(f"{sl['id']}: reusing {out.name} (config, narration and clip unchanged)")
         return out, json.loads(mp.read_text(encoding="utf-8"))
-    return out, render(clip, cfg_p, out, D)
+    return out, render(clip, cfg_p, out, D, sl.get("clip_label"))
 
 
 def fit(board_p, tl_p, ov_p):
     sys.path.insert(0, str(HERE))
-    from composite_clips import DELAY
+    from composite_clips import clip_window, line_marks, read_sync_events
     board = json.loads(Path(board_p).read_text(encoding="utf-8"))
     tl = json.loads(Path(tl_p).read_text(encoding="utf-8"))
     ov = json.loads(Path(ov_p).read_text(encoding="utf-8"))
     root = Path(ov_p).resolve().parent
-    starts = [l["start"] for l in tl["lines"]]
+    sync = read_sync_events(board_p)
     slides = board["slides"]
     changed = False
     for i, sl in enumerate(slides):
@@ -830,9 +1025,8 @@ def fit(board_p, tl_p, ov_p):
         clip = Path(c["file"]); clip = clip if clip.is_absolute() else root / clip
         cfg_p = config_path(clip, c.get("long_take"))
         cfg = read_config(cfg_p)
-        t_in = (0 if i == 0 else starts[sl["from_line"] - 1]) + DELAY
-        t_out = (starts[slides[i + 1]["from_line"] - 1] if i + 1 < len(slides) else tl["duration"]) - 0.08
-        _, report = schedule(cfg, group_seconds(sl["long_take"], starts, t_in, t_out))
+        t_in, t_out, _, _ = clip_window(board, tl, sync, i, c)
+        _, report = schedule(cfg, group_seconds(sl["long_take"], line_marks(board, tl), t_in, t_out))
         raw = json.loads(Path(cfg_p).read_text(encoding="utf-8"))
         raw["segments"] = sorted(raw.get("segments") or [], key=lambda d: d["from"])
         for b, g in zip(report, narration_groups(cfg)):
@@ -860,12 +1054,17 @@ def main():
     p.add_argument("--language", default="en", choices=["en", "vi"])
     p.add_argument("--overwrite", action="store_true")
     p = sub.add_parser("render"); p.add_argument("clip"); p.add_argument("out"); p.add_argument("--config"); p.add_argument("--group-seconds", dest="group_seconds")
+    p.add_argument("--stage-label", dest="stage_label", help="a label shown at the top for the first 3.8 s of the clip")
+    p = sub.add_parser("first-frame"); p.add_argument("clip"); p.add_argument("--config")
     p = sub.add_parser("fit"); p.add_argument("board"); p.add_argument("timeline"); p.add_argument("video_json")
     a = ap.parse_args()
     if a.cmd == "analyse":
         analyse(a)
     elif a.cmd == "render":
-        render(a.clip, a.config or config_path(a.clip), a.out, [float(x) for x in a.group_seconds.split(",")] if a.group_seconds else None)
+        render(a.clip, a.config or config_path(a.clip), a.out, [float(x) for x in a.group_seconds.split(",")] if a.group_seconds else None,
+               a.stage_label)
+    elif a.cmd == "first-frame":
+        print(first_frame(a.clip, a.config or config_path(a.clip)))
     else:
         fit(a.board, a.timeline, a.video_json)
 

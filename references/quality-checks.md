@@ -25,6 +25,7 @@ The report is `_check/<file_name>.report.md`. Every warning gets looked at and d
 - [ ] The first frame is not empty (the title is already on screen).
 - [ ] No cover patch over text (a region box slightly off) in "settled" and "end"; no leftover slice of text next to a region in "in".
 - [ ] Transitions never show two slides clearly at once; the light streak does not cover text for more than 0.3 s.
+- [ ] Voice and picture agree: the voice of a slide starts at least 0.15 s after its transition has finished, a region has finished appearing before the line that mentions it, process steps and table rows appear in order, no slide stays on screen for under 2 s, no scene of a long take is under 1.5 s, and the placeholder slide never flashes around a full-screen clip (all measured by `check_video.py`; hard failures when the storyboard has `"sync": 1`).
 - [ ] Zooms do not cut text at the edge; circles hug their region and do not cut the neighbour's text; question slides circle the answer after the wait; the countdown covers nothing.
 - [ ] Recordings sit in their frame, not distorted, no large black bars; their first and last frames match the picture under them.
 - [ ] One focal point per frame; text readable at 480 px wide.

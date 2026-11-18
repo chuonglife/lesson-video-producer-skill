@@ -25,9 +25,48 @@ Fixes and features from recording a real course with `record_actions.py`: every 
 - `make_voice.py`: Kokoro now reads its own name right ("Kokoro" -> "Koh-koh-roh" in the Kokoro pronunciation table).
 - `make_video.py` and `mix_audio.py`: the music bed defaults to **-28 dB** instead of -22, which sounded loud under the voice. `--music-db -22` gives the old level.
 
+### Voice and picture in sync (the picture never trails the voice)
+
+Found by timing a real course: the voice started 0.24 s before the picture arrived on every slide, regions appeared after the sentence that mentioned them, and some scenes flashed for under a second. Videos built from an older storyboard (no `"sync"` key) keep the old timing; run `storyboard.py` again to get the new one.
+
+- **The slide enters before its first line.** `storyboard.json` now has `"sync": 1` and a `lead_wait` per slide (transition time + 0.4 s). `render.mjs` / `video.js` start the transition so the picture has settled when the voice starts, and never change slide while the previous slide's voice or countdown is still running. `make_voice.py` widens the silence at a slide change when the real gap is too short, and writes `speech_start` / `speech_end` (when the voice really starts and stops, ignoring the silence at the edges of each voice file) into the timeline.
+- **A region finishes 0.3 s before the line that mentions it.** Regions of one line are staggered by 0.25 s and the last one finishes 0.3 s early. Automatic circles and the pointer follow `speech_start`, not the line start.
+- **Each region is assigned to the first line that mentions it** (`storyboard.py`, `match_regions`): word and word-pair matching with rare words weighted up, ideas of multi-idea cards matched one by one, names and numbers that open an idea counted on their own. Before, regions were spread evenly, so a sentence could be spoken a line or two before its card appeared.
+- **Ordered slides keep their order.** Process steps, table rows and lists numbered 1, 2, 3... appear in position order; a build check (`SHOW ORDER ERROR`) refuses a narration that would show a later step first (`"order": false` in video.json to allow it).
+- **Closing, question and key-message slides show at most two regions per line**, so the last region does not finish after the voice.
+- **A bullet list in one text box is split into one region per paragraph** (measured on the slide image), so it no longer appears all at once while the voice reads it item by item.
+- **A clip that covers its slide** (`"mode": "full"` long take) replaces the slide image with the first frame of the edited clip (`long_take.py first-frame`), so the placeholder slide does not flash before and after the clip; the clip fades in over 0.12 s and carries a 3.8 s stage label (the slide's label and title). New storyboard keys: `lead_wait`, `covers_clip`, `clip_label`; the render plan (`events.json`) now lists `entered`, `reveals`, `circles` and `cursor_marks`.
+- **Hand-drawn circles are scored, not only triggered by emphasis words.** Every region gets a score (emphasis word in its line, the big number of a big-numbers slide, the last table row, word overlap with the line being read); the best one or two (three with three emphatic lines) are circled, at most one per line, for at least 2.2 s so they never flicker. Auto circles now also work on two-column, agenda, chart and key-message slides, and more emphasis phrases count ("only", "notice", "the answer", "that is why").
+- **The teaching pointer is on by default for English lessons** (it was off): it moves to the region being explained and rests outside the text. `{"_all": {"cursor": false}}` turns it off; other languages stay off by default.
+- `make_video.py`: the language is read from `slides.json` when `--lang` is not given; a `--lang` that differs from the deck stops the run instead of mixing languages.
+
+### Machine checks added to `check_video.py`
+
+New `--storyboard` option (passed by `make_video.py`; derived from `--events` otherwise). Hard failures when the storyboard has `"sync": 1`, warnings otherwise:
+
+- the voice of a slide starts at least 0.15 s after the slide has arrived;
+- a region has finished appearing before the line that mentions it starts;
+- process and table regions appear in position order;
+- no slide is on screen for less than 2 s; no scene of a long take (the picture between two changes of picture) lasts under 1.5 s; the placeholder slide never flashes for 0.05 to 1.5 s around a full-screen clip;
+- a clip's slide is not counted as short; the report lists the circle and pointer counts.
+
+### Long takes and compositing
+
+- Cuts of 90 minutes or more are labelled "3.5 hours later" instead of "210 min later".
+- Anti-flicker rules in `long_take.py`: a cut is never shorter than 2 s (`cut_seconds` default 2.4), a wait core under 3 s plays at normal speed, a fast-forward is never shorter than 1.5 s, and an action fragment under 1.5 s squeezed between two cuts or inserts is merged into the neighbour (`merge_crumbs`). `<out>.metrics.json` lists the scenes.
+- New in `long_take.py`: `first-frame`, `render --stage-label`, automatic callout frames around the text that appeared before each reading segment (`callouts`, `auto_callouts`), a `bg` mask for an OS dialog that got into the frame; the picture of a narration group changes 0.4 s before its voice.
+- `composite_clips.py`: under sync a clip window starts and ends with the slides' real transition times (`clip_window`, `line_marks`); the final mix always passes `alimiter=limit=0.75` (peak at most -2.5 dBFS; a real video insert had peaked at -0.1 dBTP) and the AAC encoder runs with `-aac_pns 0`; new `--self-test` for the insert sound mix.
+- `insert_artifacts.py`: `"static": true` renders one still frame of a text insert (error when the text does not fit; fewer `lines`), `"outline": [{"from", "to", "box"}]` draws a frame around a region and follows the zoom.
+- `smooth_scroll.py`: a very long scroll now drops source frames instead of inserting new ones, so the clip keeps its length and later timestamps do not move; `--fixed-top PX` for a tab strip or title bar that must not scroll; `--segments <clip.longtake.json>` smooths only the worthwhile pieces of a long take and restores each piece's exact length.
+
+### Voice review
+
+- `review_voice.py`: multi-word English numbers are merged before comparing ("twenty one" = "21", "one hundred" = "100", "a hundred and thirty five" = "135"); the second listen is no longer primed with the script line (priming made Whisper copy the script and hide real misreadings); an exception excuses a heard word only on an exact whole-phrase match, and entries longer than 3 words are ignored and listed; tone mismatches that remain after the second listen go into a "LISTEN BY HAND" list instead of being dropped.
+
 ### Docs
 
 - README: recording from an action script is the default way to record a how-to; optional LibreOffice and Poppler in "Before you start".
+- SKILL.md: principles describe the new timing, circles and pointer; `references/motion-and-sound.md` has a voice-picture timing section; `references/screen-recording.md` sections 6.6 to 6.8.
 - SKILL.md: step 2b covers `wait_file`, `if_text`, the 8 s start, `close_recording_windows.py` and the artifact inserts; step 4 adds "watch it as a learner would".
 - `references/screen-recording.md`: section 6.1 (PowerShell start, focus, the two new steps, background work and `/exit`) and a new section 6.5 (inserts). `references/narration-voice.md` and `references/motion-and-sound.md` updated.
 
