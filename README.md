@@ -81,7 +81,7 @@ The voice is not in `requirements.txt`: install the engine for the language of y
 | Lessons in | Engine | Install into the `.venv` | Notes |
 |---|---|---|---|
 | English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, Mandarin | [Kokoro-82M](https://github.com/hexgrad/kokoro) | `pip install kokoro soundfile` | Python 3.10 to 3.12 only. Pulls torch, about 1 GB and 15 minutes. Some languages also need [espeak-ng](https://github.com/espeak-ng/espeak-ng/releases) |
-| Vietnamese | [VieNeu-TTS](https://github.com/pnnbao97/VieNeu-TTS) v3 Turbo | `pip install vieneu soundfile` | Runs on the CPU without torch (ONNX Runtime). For an NVIDIA GPU see its README (CUDA torch first on Windows) |
+| Vietnamese | [VieNeu-TTS](https://github.com/pnnbao97/VieNeu-TTS) v3 Turbo | `pip install vieneu soundfile` | Runs on the CPU without torch (ONNX Runtime). About 800 MB and 9 minutes (measured on Windows 11). For an NVIDIA GPU see its README (CUDA torch first on Windows) |
 | Any language, your own voice | none | nothing | Record one file per narration line and use `--engine files` (see the [FAQ](#can-i-use-my-own-recorded-voice)) |
 
 Both engines are free, Apache 2.0 and run offline after the first download of the model. You only need the one you use. **Forgot to install it?** Nothing breaks: before it does any work, `make_video.py` checks that the engine loads in the Python it will use and, if not, stops and prints the exact command for your machine (and warns when that Python is 3.13 or newer, or is not a virtual environment). Claude reads that message and can finish the setup with you.
