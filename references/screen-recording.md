@@ -6,7 +6,7 @@ For a software how-to lesson that is mostly screen recording (Claude Code doing 
 
 ## 1. Prepare the window
 
-- **Switch any Vietnamese (or other) input method to English** (UniKey, EVKey, OpenKey) and the keyboard to en-US before recording: a Telex input method turned "for lesson" into "fỏ leson". `record_screen.py` warns when it sees one; scripted typing uses KEYEVENTF_UNICODE and is safe, typing by hand is not.
+- **Switch any Vietnamese (or other) input method to English** (UniKey, EVKey, OpenKey) and the keyboard to en-US before recording: a Telex input method rewrote "for lesson" as it typed (it reads the "r" after a vowel as a tone mark, and the second "s" too). `record_screen.py` warns when it sees one; scripted typing uses KEYEVENTF_UNICODE and is safe, typing by hand is not.
 
 - Browser: a private window or a clean profile, a temporary chat in AI tools, the interface in the course language (`?hl=en` on Google products), no bookmarks bar, no notifications, no account name in a side bar. Zoom the page to 110 to 125% so text stays readable when the clip shrinks to a 1280x720 frame inside a slide.
 - Office apps: a clean sample file, the ribbon collapsed if it is not needed, a normal-size pointer.

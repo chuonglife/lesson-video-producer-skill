@@ -85,16 +85,18 @@ REVEAL_BY_TYPE = {
 # A slide that shows everything at once and then holds still for half a minute is what puts learners to sleep.
 STEPPED_TYPES = {"cards", "big-numbers", "process", "objectives", "compare", "question", "summary", "table", "agenda",
                  "two-column", "chart", "key-message", "closing"}
-# Attention circles drawn automatically when the line that reveals a region carries an emphasis word
+# Attention circles drawn automatically when the line that reveals a region carries an emphasis word.
+# The escaped strings are the Vietnamese equivalents (remember, important, don't, never, mistake, the key point, must...).
 AUTO_CIRCLE_TYPES = {"cards", "process", "objectives", "big-numbers", "table", "compare", "summary", "question", "two-column", "agenda",
                      "chart", "key-message"}
 EMPHASIS = re.compile(
     r"(?<![\w])(remember|important|never|don't|do not|mistake|the key|key point|must|always|the point|note that|watch out|"
     r"notice|look at|this one|the answer|only|watch|that is why|this is why|"
-    r"careful|critical|essential|crucial|nhớ|quan trọng|đừng|không bao giờ|lỗi|chính là|mấu chốt|lưu ý|cốt lõi|chú ý|"
-    r"bắt buộc|tuyệt đối|phải|đáng nhớ|then chốt)(?![\w])", re.I)
+    r"careful|critical|essential|crucial|nh\u1edb|quan tr\u1ecdng|\u0111\u1eebng|kh\u00f4ng bao gi\u1edd|l\u1ed7i|ch\u00ednh l\u00e0|m\u1ea5u ch\u1ed1t|l\u01b0u \u00fd|c\u1ed1t l\u00f5i|ch\u00fa \u00fd|"
+    r"b\u1eaft bu\u1ed9c|tuy\u1ec7t \u0111\u1ed1i|ph\u1ea3i|\u0111\u00e1ng nh\u1edb|then ch\u1ed1t)(?![\w])", re.I)
 
-PAUSE_PHRASE = re.compile(r"pause (the|this) video|t[ạa]m\s+d[ừu]ng\s+video", re.I)
+# second branch: Vietnamese "pause the video", with or without tone marks
+PAUSE_PHRASE = re.compile(r"pause (the|this) video|t[\u1ea1a]m\s+d[\u1eebu]ng\s+video", re.I)
 SELF_PAUSE_HOLD = 3.0   # narration tells learners to press pause: the video only holds 3 s, no countdown
 MAX_HOLD = 60.0         # otherwise the video waits for the stated time itself, never longer than this
 
@@ -453,7 +455,8 @@ def narration_lines(d):
 
 
 def seconds_in(txt):
-    m = re.search(r"(\d+(?:[,.]\d+)?)\s*(seconds?|secs?|s\b|minutes?|mins?|gi[âa]y|ph[úu]t)", txt or "", re.I)
+    # gi[...]y and ph[...]t: Vietnamese "seconds" and "minutes", with or without tone marks
+    m = re.search(r"(\d+(?:[,.]\d+)?)\s*(seconds?|secs?|s\b|minutes?|mins?|gi[\u00e2a]y|ph[\u00fau]t)", txt or "", re.I)
     if not m:
         return None
     v = float(m.group(1).replace(",", "."))
@@ -468,7 +471,8 @@ def hold_seconds(d, ov):
     if ov.get("hold") is not None:
         return float(ov["hold"])
     notes = d.get("notes") or ""
-    note_hold = re.search(r"(hold|silence|wait|pause for|l[ặa]ng)\s+(\d+(?:[,.]\d+)?)\s*(seconds?|secs?|s\b|gi[âa]y)", notes, re.I)
+    # l[...]ng: Vietnamese "silence"; gi[...]y: "seconds"
+    note_hold = re.search(r"(hold|silence|wait|pause for|l[\u1eb7a]ng)\s+(\d+(?:[,.]\d+)?)\s*(seconds?|secs?|s\b|gi[\u00e2a]y)", notes, re.I)
     if d["type"] == "question":
         if PAUSE_PHRASE.search(d.get("narration") or ""):
             return SELF_PAUSE_HOLD
@@ -511,14 +515,16 @@ def find_region(items, key):
 
 
 def circle_target(notes):
+    # "khoanh" is Vietnamese for "circle"; the escaped words mean "answer" and "and"
     m = re.search(r"circle\s+(?:the\s+)?(?:answer|option)\s+([A-Da-d])(?![\w])", notes, re.I) or \
-        re.search(r"khoanh\s+(?:đáp án\s+)([A-Da-d])(?![\w])", notes, re.I) or \
-        re.search(r"(?:circle|khoanh)\s+(?:the\s+|đáp án\s+)?(\"[^\"]+\"|[^,.;]+?)(?=\s+after|\s+when|\s+and|\s+sau|\s+khi|\s+và|,|\.|;|$)", notes, re.I)
+        re.search(r"khoanh\s+(?:\u0111\u00e1p \u00e1n\s+)([A-Da-d])(?![\w])", notes, re.I) or \
+        re.search(r"(?:circle|khoanh)\s+(?:the\s+|\u0111\u00e1p \u00e1n\s+)?(\"[^\"]+\"|[^,.;]+?)(?=\s+after|\s+when|\s+and|\s+sau|\s+khi|\s+v\u00e0|,|\.|;|$)", notes, re.I)
     return m.group(1).strip().strip('"') if m else None
 
 
 def zoom_target(notes):
-    m = re.search(r"(?:zoom(?:\s+in)?(?:\s+on|\s+into)?|ph[óo]ng to)\s+(?:the\s+|ô\s+|vùng\s+)?(?:card\s+|step\s+|cell\s+|thẻ\s+|bước\s+)?([^,.;]+?)(?=\s+when|\s+as|\s+khi|,|\.|;|$)", notes, re.I)
+    # Vietnamese forms: "phong to" (zoom in), and the escaped words for cell, area, card, step
+    m = re.search(r"(?:zoom(?:\s+in)?(?:\s+on|\s+into)?|ph[\u00f3o]ng to)\s+(?:the\s+|\u00f4\s+|v\u00f9ng\s+)?(?:card\s+|step\s+|cell\s+|th\u1ebb\s+|b\u01b0\u1edbc\s+)?([^,.;]+?)(?=\s+when|\s+as|\s+khi|,|\.|;|$)", notes, re.I)
     return m.group(1).strip() if m else None
 
 
@@ -610,7 +616,8 @@ def main():
         effect, sound = REVEAL_BY_TYPE.get(stype, ("fade", None))
         effect = ov.get("effect", effect)
         M = len(lines)
-        stepped = stype in STEPPED_TYPES or bool(re.search(r"reveal (each|one by one|in turn)|one by one|hi[ệe]n (t[ừu]ng|l[ầa]n l[ưu][ợo]t|d[ầa]n)", notes, re.I))
+        # the escaped branch is Vietnamese for "reveal one by one / in turn / gradually"
+        stepped = stype in STEPPED_TYPES or bool(re.search(r"reveal (each|one by one|in turn)|one by one|hi[\u1ec7e]n (t[\u1eebu]ng|l[\u1ea7a]n l[\u01b0u][\u1ee3o]t|d[\u1ea7a]n)", notes, re.I))
         if ov.get("stepped") is not None:
             stepped = bool(ov["stepped"])
         actions = []

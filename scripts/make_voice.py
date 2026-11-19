@@ -12,7 +12,8 @@ Engines (all local except edge):
           The first letter of the voice picks the language: a US English, b UK English, e Spanish, f French, h Hindi,
           i Italian, j Japanese, p Brazilian Portuguese, z Mandarin. pip install kokoro soundfile (Python 3.10-3.12).
           Mandarin also needs pip install "misaki[zh]"; Japanese pip install "misaki[ja]" (a C++ compiler on Windows).
-  vieneu  VieNeu-TTS v3 Turbo, Apache 2.0, Vietnamese. Default voice "Hải Đăng". Always --pace slow: this model must
+  vieneu  VieNeu-TTS v3 Turbo, Apache 2.0, Vietnamese. Default voice "Hai Dang" (write it with or without
+          Vietnamese tone marks; any preset name matches the same way). Always --pace slow: this model must
           not be time-stretched (atempo makes it sound like a slowed-down tape); slow pace keeps the model's own speed
           and leaves longer pauses between lines instead.
   files   your own recordings: --voice <folder> holding one file per narration line, named by line number
@@ -54,9 +55,11 @@ PRONUNCIATION = {
     "edge": {},
 }
 
-EMPHASIS = re.compile(r"\b(remember|important|key|never|always|mistake|secret|most)\b|nhớ|quan trọng|đừng|luôn|không bao giờ|lỗi", re.I)
-TURN = ("but ", "now", "so ", "and here", "here is", "that is", "however", "remember", "nhưng", "bây giờ", "vậy", "và đây")
-COUNT = ("one,", "two,", "three,", "four,", "five,", "six,", "first,", "second,", "third,", "một,", "hai,", "ba,", "bốn,", "năm,", "sáu,")
+# Emphasis, turn and counting words that shape the pause after a line. The escaped strings are Vietnamese words
+# (remember, important, don't, never, mistake; but, now, so, and here; one, two, three...).
+EMPHASIS = re.compile(r"\b(remember|important|key|never|always|mistake|secret|most)\b|nh\u1edb|quan tr\u1ecdng|\u0111\u1eebng|lu\u00f4n|kh\u00f4ng bao gi\u1edd|l\u1ed7i", re.I)
+TURN = ("but ", "now", "so ", "and here", "here is", "that is", "however", "remember", "nh\u01b0ng", "b\u00e2y gi\u1edd", "v\u1eady", "v\u00e0 \u0111\u00e2y")
+COUNT = ("one,", "two,", "three,", "four,", "five,", "six,", "first,", "second,", "third,", "m\u1ed9t,", "hai,", "ba,", "b\u1ed1n,", "n\u0103m,", "s\u00e1u,")
 
 
 def _jitter(text, span):
@@ -143,7 +146,28 @@ async def tts_edge(text, voice, out):
 
 
 _VIENEU = None
+# Default VieNeu preset voice "Hai Dang"; the library needs its exact Vietnamese name, written here as escapes.
+VIENEU_DEFAULT = "H\u1ea3i \u0110\u0103ng"
 _KOKORO = {}
+
+
+def fold(name):
+    """Lower case without tone marks, so "Hai Dang" matches the preset name written in Vietnamese."""
+    import unicodedata
+    t = unicodedata.normalize("NFD", name.replace("\u0111", "d").replace("\u0110", "D"))   # the letter d with stroke
+    return " ".join("".join(c for c in t if unicodedata.category(c) != "Mn").lower().split())
+
+
+def vieneu_voice(engine, voice):
+    """The preset name VieNeu knows for `voice`: itself when it is one, else the preset whose name matches without tone marks."""
+    try:
+        names = [n for _, n in engine.list_preset_voices()]
+    except Exception:
+        return voice
+    if voice in names:
+        return voice
+    hit = [n for n in names if fold(n) == fold(voice)]
+    return hit[0] if len(hit) == 1 else voice   # unknown or ambiguous: let VieNeu report it with its list of voices
 
 
 def tts_vieneu(text, voice, out):
@@ -156,7 +180,7 @@ def tts_vieneu(text, voice, out):
         except Exception:
             dev = "cpu"
         _VIENEU = Vieneu(device=dev)
-    audio = _VIENEU.infer(text, voice=voice, temperature=0.6, top_k=25, top_p=0.9,
+    audio = _VIENEU.infer(text, voice=vieneu_voice(_VIENEU, voice), temperature=0.6, top_k=25, top_p=0.9,
                           repetition_penalty=1.2, silence_p=0.15, max_chars=256, denoise=True)
     _VIENEU.save(audio, str(out))
 
@@ -195,7 +219,7 @@ async def main(a):
         extra.append(float(m.group(1).replace(",", ".")) if m else 0.0)
     out_mp3 = Path(a.out_mp3)
     cache = Path(str(out_mp3) + ".cache"); cache.mkdir(parents=True, exist_ok=True)
-    voice = a.voice or {"edge": "en-US-AndrewNeural", "vieneu": "Hải Đăng", "kokoro": "am_michael", "files": "recordings"}[a.engine]
+    voice = a.voice or {"edge": "en-US-AndrewNeural", "vieneu": VIENEU_DEFAULT, "kokoro": "am_michael", "files": "recordings"}[a.engine]
     if a.engine in ("vieneu", "files") and a.pace == "natural":
         print("This voice must not be time-stretched: using --pace slow")
         a.pace = "slow"

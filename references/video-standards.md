@@ -1,6 +1,6 @@
 # The instructional standard for video learning materials
 
-Source: *Developing digital learning materials: audio and video* (Phát triển học liệu số dạng audio, video), Institute of Technical Education, Ho Chi Minh City University of Technology and Education (lecturer Nguyen Minh Khanh), 13 slides. Section 6 adds platform specifications checked in practice on Udemy in 2026. This part of the skill does not change from video to video; what happens inside each video is the creative part.
+Source: *Developing digital learning materials: audio and video*, Institute of Technical Education, Ho Chi Minh City University of Technology and Education (lecturer Nguyen Minh Khanh), 13 slides. Section 6 adds platform specifications checked in practice on Udemy in 2026. This part of the skill does not change from video to video; what happens inside each video is the creative part.
 
 ## 1. Definition (slide 5)
 

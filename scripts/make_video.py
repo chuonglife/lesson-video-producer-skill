@@ -4,7 +4,7 @@
 MAKE THE LESSON VIDEO with ONE COMMAND from an existing deck (slides/<course>/<lesson>/slides.json + .pptx + _preview/slide-NN.png).
 
 Usage:
-  python make_video.py <slides.json> [--lang en|vi|...] [--engine kokoro|vieneu|edge|files] [--voice NAME or folder]
+  python make_video.py <slides.json> [--lang CODE] [--engine kokoro|vieneu|edge|files] [--voice NAME or folder]
                        [--no-music] [--music-db -28] [--no-sfx] [--extend] [--skip-review]
                        [--from-step N] [--workers 2] [--crf 18] [--full-render]
 
@@ -14,9 +14,10 @@ the renderer's node_modules, the Python libraries and the voice engine. A missin
 Steps (everything is written to videos/<course>/<lesson>/; a deck outside a "slides" folder goes to <slides folder>/video/):
   1. storyboard.py     slides.json + pptx -> narration.txt, storyboard.json, storyboard.md
                        (reads video.json: the output folder first, then the folder of slides.json)
-  2. make_voice.py     narration.txt -> <name>.voice.mp3 + timeline.json   (through gpu_lock). The voice follows "language"
-                       in slides.json: en am_michael, es ef_dora, fr ff_siwis, hi hf_alpha, it if_sara, ja jf_alpha,
-                       pt pf_dora, zh zf_xiaobei (Kokoro), vi VieNeu; --voice picks another; other languages stop the run
+  2. make_voice.py     narration.txt -> <name>.voice.mp3 + timeline.json   (through gpu_lock). "language" is en when missing.
+                       The voice follows "language" in slides.json: en am_michael, es ef_dora, fr ff_siwis, hi hf_alpha,
+                       it if_sara, ja jf_alpha, pt pf_dora, zh zf_xiaobei (Kokoro); the VieNeu-TTS engine for Vietnamese
+                       narration with --engine vieneu; --voice picks another; other languages stop the run
   3. review_voice.py   Whisper listens back; suspect lines are regenerated (the engines sample, so a second take usually
                        reads right) and checked again, up to 3 rounds; still wrong = STOP with the list (--skip-review to bypass)
   4. render.mjs plan   -> events.json (slide times + sound events)
@@ -190,7 +191,7 @@ def check_programs(review):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("slides")
-    ap.add_argument("--lang", help="optional; must match \"language\" in slides.json, which is used when omitted")
+    ap.add_argument("--lang", metavar="CODE", help="optional; must match \"language\" in slides.json, which is used when omitted (default en)")
     ap.add_argument("--engine", choices=["kokoro", "vieneu", "edge", "files"])
     ap.add_argument("--voice", help="a voice name (Kokoro: am_michael, af_heart, ef_dora, ...); with --engine files, the folder of recordings")
     ap.add_argument("--no-music", action="store_true")
@@ -231,7 +232,7 @@ def main():
     elif engine == "kokoro" and not a.voice:
         if base_lang not in KOKORO_VOICES:
             raise SystemExit(
-                f"No local voice for \"language\": \"{lang}\". Kokoro speaks {', '.join(sorted(KOKORO_VOICES))}; VieNeu speaks vi. "
+                f"No local voice for \"language\": \"{lang}\". Kokoro speaks {', '.join(sorted(KOKORO_VOICES))}; the VieNeu-TTS engine (--engine vieneu) reads Vietnamese. "
                 "Either record the lines yourself (--engine files --voice <folder with 001.wav, 002.wav, ...>), or force a "
                 "Kokoro voice with --voice <name> if you have heard it read this language acceptably.")
         voice_name = KOKORO_VOICES[base_lang]

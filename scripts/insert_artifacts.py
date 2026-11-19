@@ -34,7 +34,7 @@ text on the dark theme), .pptx .ppt .odp (uses _preview/slide-NN.png and contact
 or _kiem/slide-NN.png and to-anh.png from the Vietnamese edition, otherwise LibreOffice -> PDF -> images; the overview
 first, then each slide full size), .png .jpg .webp, .mp4 .mov .webm .mkv (a video with sound writes "insert_audio" into
 <out>.metrics.json; composite_clips.py mixes it under the voice).
-Label at the top left: "Opening: <file name>" (en) / "Đang mở: <file name>" (vi), on a 132 px band kept free at the top so
+Label at the top left: "Opening: <file name>" (in Vietnamese when the long take labels are Vietnamese), on a 132 px band kept free at the top so
 scrolled text never runs under it. Cache: <config folder>/_insert-cache/ (a changed file gets new pages).
 """
 import glob
@@ -66,7 +66,8 @@ for _k, _exts in {"document": ".docx .doc .odt .rtf .pdf", "text": ".md .txt .js
                   "image": ".png .jpg .jpeg .webp .bmp", "video": ".mp4 .mov .webm .mkv .avi"}.items():
     for _e in _exts.split():
         KIND_BY_EXT[_e] = _k
-OPENING = {"en": "Opening: {t}", "vi": "Đang mở: {t}"}
+# the "vi" label is Vietnamese for "Opening: <file name>"
+OPENING = {"en": "Opening: {t}", "vi": "\u0110ang m\u1edf: {t}"}
 
 
 def ease(u):

@@ -4,7 +4,7 @@
 REVIEW THE SYNTHETIC VOICE with Whisper: transcribe the narration audio and compare it with the script, then list the
 places where the voice probably misread a word (and, for Vietnamese, the wrong tone), each with its mm:ss.
 
-Usage:  python review_voice.py <voice.mp3> <narration.txt> [--lang en|vi|...] [--out <voice-review.txt>]
+Usage:  python review_voice.py <voice.mp3> <narration.txt> [--lang CODE] [--out <voice-review.txt>]
                                [--exceptions <file>] [--timeline <timeline.json>] [--only-lines 5,9]
   Needs faster-whisper. Model large-v3 by default (int8_float16 on a 4 GB GPU, int8 on CPU); set WHISPER_MODEL to change it.
   --exceptions   one word or phrase per line that you listened to and found correct (Whisper misheard it); also "said>heard".
@@ -82,22 +82,24 @@ def en_number(n):
     return str(n)
 
 
-VI_DIGITS = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín", "mười"]
+# Vietnamese number words 0 to 10, as escapes; used to spell out digits before comparing a Vietnamese transcript.
+VI_DIGITS = ["kh\u00f4ng", "m\u1ed9t", "hai", "ba", "b\u1ed1n", "n\u0103m", "s\u00e1u", "b\u1ea3y", "t\u00e1m", "ch\u00edn", "m\u01b0\u1eddi"]
 
 
 def vi_number(n):
+    # escaped strings: Vietnamese "ten", "five" (after ten), "one" (after twenty and up), "tens"
     if n <= 10:
         return VI_DIGITS[n]
     if n < 20:
-        return "mười " + ("lăm" if n == 15 else VI_DIGITS[n - 10])
+        return "m\u01b0\u1eddi " + ("l\u0103m" if n == 15 else VI_DIGITS[n - 10])
     if n < 100:
-        unit = {0: "", 1: "mốt", 5: "lăm"}.get(n % 10, VI_DIGITS[n % 10])
-        return VI_DIGITS[n // 10] + " mươi " + unit
+        unit = {0: "", 1: "m\u1ed1t", 5: "l\u0103m"}.get(n % 10, VI_DIGITS[n % 10])
+        return VI_DIGITS[n // 10] + " m\u01b0\u01a1i " + unit
     return str(n)
 
 
 def strip_marks(t):
-    t = t.replace("đ", "d")
+    t = t.replace("\u0111", "d")   # the Vietnamese letter d with stroke has no combining mark to drop
     return "".join(c for c in unicodedata.normalize("NFD", t) if unicodedata.category(c) != "Mn")
 
 
@@ -109,8 +111,9 @@ def northern(w):
 def norm(t, lang, keep_marks=False):
     t = unicodedata.normalize("NFC", t.lower())
     if lang == "vi":
-        t = re.sub(r"(\d)\s*%", r"\1 phần trăm ", t)
-        t = re.sub(r"(\d)\s*[-–]\s*(\d)", r"\1 đến \2", t)
+        # escaped strings: Vietnamese "percent" and "to" (as in "3 to 5")
+        t = re.sub(r"(\d)\s*%", "\\1 ph\u1ea7n tr\u0103m ", t)
+        t = re.sub(r"(\d)\s*[-–]\s*(\d)", "\\1 \u0111\u1ebfn \\2", t)
         t = re.sub(r"\d+", lambda m: " " + vi_number(int(m.group(0))) + " ", t)
     elif lang == "en":
         t = re.sub(r"(\d),(\d{3})", r"\1\2", t)
@@ -215,7 +218,7 @@ def strict_terms(text, lang):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mp3"); ap.add_argument("narration")
-    ap.add_argument("--lang", default="en"); ap.add_argument("--out"); ap.add_argument("--exceptions")
+    ap.add_argument("--lang", default="en", metavar="CODE", help="language of the narration (default en)"); ap.add_argument("--out"); ap.add_argument("--exceptions")
     ap.add_argument("--timeline"); ap.add_argument("--only-lines", dest="only_lines")
     a = ap.parse_args()
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -269,8 +272,9 @@ def main():
         words, words_m, times = [], [], []
         for sg in segs:
             for w in (sg.words or []):
-                wt = w.word.replace("%", " percent " if lang == "en" else " phần trăm " if lang == "vi" else "%")
-                wt = re.sub(r"^\s*[-–](\d)", (r" to \1" if lang == "en" else r" đến \1"), wt)
+                # escaped strings: Vietnamese "percent" and "to"
+                wt = w.word.replace("%", " percent " if lang == "en" else " ph\u1ea7n tr\u0103m " if lang == "vi" else "%")
+                wt = re.sub(r"^\s*[-–](\d)", (r" to \1" if lang == "en" else " \u0111\u1ebfn \\1"), wt)
                 x, y = norm(wt, lang), norm(wt, lang, True)
                 words += x; words_m += y; times += [offset + w.start] * len(x)
         return words, words_m, times
@@ -344,7 +348,8 @@ def main():
             count["same words"] += 1; continue   # the same words spelled two ways, not a misreading
         if tag == "replace" and len(g) <= 2 and len(n) <= 2:
             continue
-        if tag == "insert" and n.strip() in ("percent", "phan cham", "phần trăm"):
+        # "phan cham" is Vietnamese "percent" after norm() drops the tone marks and folds tr to ch; the escape is the same word
+        if tag == "insert" and n.strip() in ("percent", "phan cham", "ph\u1ea7n tr\u0103m"):
             continue  # Whisper adds "%" after a number from context
         if tag in ("insert", "replace") and n and INVENTED.search(n):
             count["invented"] += 1; filtered.append(f"{mmss(t)} {tag} '{g}'>'{n}' (common invented phrase)"); continue

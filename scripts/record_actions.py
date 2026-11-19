@@ -126,7 +126,8 @@ def vk(code, up=False):
 
 
 def unicode(ch):
-    """Send one character as KEYEVENTF_UNICODE (VK_PACKET): an input method (Telex/VNI) cannot turn "for" into "fỏ"."""
+    """Send one character as KEYEVENTF_UNICODE (VK_PACKET): an input method (Telex/VNI) cannot
+    rewrite it (Telex reads the "r" in "for" as a tone mark)."""
     for f in (4, 4 | 2):
         i = INP(type=1); i.ki = KI(0, ord(ch), f, 0, None); _send(i); time.sleep(0.012)
 

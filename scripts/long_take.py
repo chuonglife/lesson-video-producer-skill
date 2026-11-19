@@ -8,7 +8,7 @@ clicks and keys are highlighted, each piece of narration lands on its own piece 
 
 Usage:
   python long_take.py analyse <clip.mp4> [--threshold 0.004] [--min-wait 4] [--allow-blips 1]
-                                         [--mode fast|cut] [--language en|vi] [--overwrite]
+                                         [--mode fast|cut] [--language en] [--overwrite]
       -> <clip>.longtake.json   the config (a draft: segments, waits, zoom suggestions; the writer fills "narration")
          <clip>.action-table.md + .action-table-NN.png   the action table: times, events, waits, key frames
   python long_take.py render <clip.mp4> <out.mp4> [--config <longtake.json>] [--group-seconds 12.5,30,8] [--stage-label "Step 2"]
@@ -83,8 +83,9 @@ SCENE_MIN = 1.5               # machine check: a scene (between two changes of p
 GROUP_LEAD = 0.4              # the picture of a narration group changes this many seconds before its voice starts (seconds)
 ZOOM_MAX = 3.0
 OUT_W, OUT_H, FPS = 1920, 1080, 30
+# On-screen labels per narration language; "vi" holds the Vietnamese for "hours later", "min later", "sec later".
 LABELS = {"en": {"hour": "{n} hours later", "min": "{n} min later", "sec": "{n} sec later", "fast": "{x}× speed  »"},
-          "vi": {"hour": "{n} giờ sau", "min": "{n} phút sau", "sec": "{n} giây sau", "fast": "Tua {x}×  »"}}
+          "vi": {"hour": "{n} gi\u1edd sau", "min": "{n} ph\u00fat sau", "sec": "{n} gi\u00e2y sau", "fast": "Tua {x}×  »"}}
 ACCENT = (252, 163, 17)       # the accent of the dark-blue theme (RGB)
 LABEL_BG = (20, 33, 61)
 FONTS = ["C:/Windows/Fonts/seguisb.ttf", "C:/Windows/Fonts/segoeui.ttf", "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -492,10 +493,11 @@ def analyse(a):
 
 
 def check_ime(ev, scripted=False):
-    """After recording: typed characters with Vietnamese diacritics (an input method such as UniKey/EVKey in Telex/VNI was on)
+    """After recording: typed characters with Vietnamese tone marks (an input method such as UniKey/EVKey in Telex/VNI was on)
     or characters sent as VK_PACKET (an input method, or a typing tool)."""
     import unicodedata
-    accented = [e for e in ev if e.get("kind") == "type" and any(c in "đĐ" or any(unicodedata.combining(x) for x in unicodedata.normalize("NFD", c))
+    # an accented letter, or the Vietnamese d with stroke (lower and upper case, escaped)
+    accented = [e for e in ev if e.get("kind") == "type" and any(c in "\u0111\u0110" or any(unicodedata.combining(x) for x in unicodedata.normalize("NFD", c))
                                                                    for c in e.get("char", ""))]
     packets = [e for e in ev if e.get("packet")]
     out = []
@@ -1051,7 +1053,8 @@ def main():
     p.add_argument("--min-wait", dest="min_wait", type=float, default=DETECT_DEFAULTS["min_wait"], help="shortest wait (seconds)")
     p.add_argument("--allow-blips", dest="allow_blips", type=float, default=DETECT_DEFAULTS["allow_blips"], help="bridge short changes (a spinner, a log line) up to N seconds")
     p.add_argument("--mode", default="fast", choices=["fast", "cut"])
-    p.add_argument("--language", default="en", choices=["en", "vi"])
+    # "vi" (Vietnamese labels) is kept for the VieNeu narration; it is not listed in the help on purpose
+    p.add_argument("--language", default="en", choices=["en", "vi"], metavar="CODE", help="language of the wait labels (default en)")
     p.add_argument("--overwrite", action="store_true")
     p = sub.add_parser("render"); p.add_argument("clip"); p.add_argument("out"); p.add_argument("--config"); p.add_argument("--group-seconds", dest="group_seconds")
     p.add_argument("--stage-label", dest="stage_label", help="a label shown at the top for the first 3.8 s of the clip")

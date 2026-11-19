@@ -18,7 +18,8 @@ import sys
 from pathlib import Path
 
 MAXL = 42
-TAGS = re.compile(r"\s*\[(?:laugh|chuckle|sigh|clear throat|cười|thở dài|hắng giọng)\]", re.I)
+# Voice tags removed from the subtitles; the escaped ones are VieNeu's Vietnamese tags for laugh, sigh, clear throat.
+TAGS = re.compile(r"\s*\[(?:laugh|chuckle|sigh|clear throat|c\u01b0\u1eddi|th\u1edf d\u00e0i|h\u1eafng gi\u1ecdng)\]", re.I)
 
 
 def tc(t, sep=","):

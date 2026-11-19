@@ -32,7 +32,7 @@ Long-take mode (long_take.py, see references/screen-recording.md section 6):
                  no later step can show it.
   --no-cursor    do not record the mouse pointer (scripted recordings that do not use the mouse).
 Before recording the script warns when a Vietnamese input method (UniKey, EVKey, OpenKey...) runs or the keyboard layout
-of the window is not en-US: such an input method rewrites typed text ("for lesson" became "fỏ leson").
+of the window is not en-US: such an input method rewrites typed text ("for lesson" lost its "r" and one "s" to tone marks).
 """
 import argparse
 import ctypes
@@ -131,7 +131,7 @@ def warn_input_method(hwnd):
         pass
     if found:
         print("INPUT METHOD WARNING: " + "; ".join(found) + ". Switch the Vietnamese input method to E/English (and the keyboard "
-              "to en-US) before recording, or typed text changes (\"for lesson\" became \"fỏ leson\").")
+              "to en-US) before recording, or typed text changes (\"for lesson\" lost its \"r\" and one \"s\" to tone marks).")
     return found
 
 
