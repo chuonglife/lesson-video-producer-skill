@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## v1.2.1 - 2026-11-19
 
-- **A missing voice engine stops the run before step 1, with the fix.** Without Kokoro the run used to build the storyboard and then fail at step 2 with `ModuleNotFoundError: No module named 'kokoro'`. `make_video.py` now imports the engine (`kokoro` + `soundfile`, `vieneu` or `edge_tts`) in the Python it will use and, if that fails, prints the install command for that Python, tells you to create a 3.12 virtual environment first when that Python is 3.13 or newer or not a virtual environment, names `KOKORO_PYTHON` / `VIENEU_PYTHON`, and offers `--engine files` with your own recordings. SKILL.md tells Claude how to set the voice up with the user; the README FAQ answers "What if Kokoro is not installed?".
+- **A missing voice engine stops the run before step 1, with the fix.** Without Kokoro the run used to build the storyboard and then fail at step 2 with `ModuleNotFoundError: No module named 'kokoro'`. `make_video.py` now imports the engine (`kokoro` + `soundfile`, `vieneu` or `edge_tts`) in the Python it will use and, if that fails, prints the install command for that Python, tells you to create a 3.12 virtual environment first when that Python is 3.13 or newer or not a virtual environment, names `KOKORO_PYTHON` / `VIENEU_PYTHON`, and offers `--engine files` with your own recordings. SKILL.md tells Claude how to set the voice up with the user.
+- **Install section: pick the voice engine.** A table of Kokoro (English and seven other languages), VieNeu-TTS (Vietnamese, `pip install vieneu soundfile`, CPU without torch) and your own recordings, the VieNeu line in every install block, `VIENEU_PYTHON` and `setx` next to `KOKORO_PYTHON`, and a one-line voice check (`voice OK`). The FAQ answers "What if Kokoro is not installed?". The intro said "eight other languages" for Kokoro: it is seven.
 
 ## v1.2.0 - 2026-11-17
 

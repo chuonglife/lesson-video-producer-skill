@@ -69,21 +69,21 @@ def check_voice_engine(engine, py_tts):
     ver, in_venv = out[0], out[1] == "1"
     env = {"kokoro": "KOKORO_PYTHON", "vieneu": "VIENEU_PYTHON"}.get(engine)
     msg = [f"The {engine} voice is not installed in this Python: {py_tts} (Python {ver})."]
-    if engine == "kokoro":
-        too_new = ver != "?" and tuple(map(int, ver.split("."))) >= (3, 13)
+    if engine in ("kokoro", "vieneu"):
+        too_new = engine == "kokoro" and ver != "?" and tuple(map(int, ver.split("."))) >= (3, 13)
+        target = py_tts
         if too_new or not in_venv:
             why = "Kokoro does not install on Python 3.13 or newer" if too_new else "this is not a virtual environment"
-            venv_py = ".venv\\Scripts\\python.exe" if os.name == "nt" else ".venv/bin/python"
+            target = ".venv\\Scripts\\python.exe" if os.name == "nt" else ".venv/bin/python"
             msg.append(f"{why}: create a Python 3.12 environment in the skill folder first "
                        f"({'py -3.12' if os.name == 'nt' else 'python3.12'} -m venv .venv), install requirements.txt into it, "
-                       f"then run make_video.py with {venv_py}.")
-            target = venv_py
+                       f"then run make_video.py with {target}.")
+        if engine == "kokoro":
+            msg.append(f"Install the voice once (about 15 minutes, pulls torch; pip stays silent while it downloads): "
+                       f"\"{target}\" -m pip install kokoro soundfile")
         else:
-            target = py_tts
-        msg.append(f"Install the voice once (about 15 minutes, pulls torch; pip stays silent while it downloads): "
-                   f"\"{target}\" -m pip install kokoro soundfile")
-    elif engine == "vieneu":
-        msg.append("Install VieNeu-TTS from its repository (usually in its own virtual environment).")
+            msg.append(f"Install the voice once (CPU, no torch): \"{target}\" -m pip install vieneu soundfile "
+                       "(NVIDIA GPU: see https://github.com/pnnbao97/VieNeu-TTS).")
     else:
         msg.append(f"\"{py_tts}\" -m pip install edge-tts")
     if env:

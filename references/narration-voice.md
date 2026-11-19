@@ -5,7 +5,7 @@
 | | Kokoro-82M | VieNeu-TTS v3 Turbo |
 |---|---|---|
 | Languages | US and UK English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, Mandarin (the first letter of the voice: a, b, e, f, h, i, j, p, z) | Vietnamese |
-| Install | `pip install kokoro soundfile` (Python 3.10 to 3.12; espeak-ng for some languages) | from its repository, usually in its own virtual environment |
+| Install | `pip install kokoro soundfile` (Python 3.10 to 3.12; espeak-ng for some languages) | `pip install vieneu soundfile` (CPU via ONNX Runtime, no torch; NVIDIA GPU: see [its README](https://github.com/pnnbao97/VieNeu-TTS)) |
 | Default voice | `am_michael` (US male); `af_heart` is the best-rated female voice | "Hải Đăng" (northern male) |
 | Settings | speed per line 0.88 to 1.10 by its role | temperature 0.6, top_k 25, top_p 0.9, repetition penalty 1.2, silence 0.15, denoise |
 | Pace | `natural`: speed and pauses vary with each line | `slow`: the model's own speed, 0.85 s after a sentence, 1.3 s after a question, 1.0 s before a turn, plus or minus 12% |

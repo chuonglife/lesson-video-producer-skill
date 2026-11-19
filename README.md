@@ -4,7 +4,7 @@
 
 You give Claude a slide deck. Claude reads the deck, builds a storyboard of what appears on which spoken line, generates the voice line by line, has Whisper listen back for mispronounced words, mixes the soundtrack, renders the picture frame by frame in headless Chrome, measures the result (loudness, frozen frames, jumpy scrolling) and looks at contact sheets before handing the video over. Change one slide and only that slide is rendered again.
 
-It works in Claude Code, the Claude desktop app and the Claude Agent SDK. For self-paced online courses on Udemy, Teachable, Coursera, Thinkific, Kajabi or any LMS, corporate training and onboarding videos, flipped-classroom lectures and software tutorials. English and eight other languages with Kokoro, Vietnamese with VieNeu, both free and running on your own computer. MIT licensed.
+It works in Claude Code, the Claude desktop app and the Claude Agent SDK. For self-paced online courses on Udemy, Teachable, Coursera, Thinkific, Kajabi or any LMS, corporate training and onboarding videos, flipped-classroom lectures and software tutorials. English and seven other languages with Kokoro, Vietnamese with VieNeu, both free and running on your own computer. MIT licensed.
 
 ![Nine frames of the example video: the title, the objectives, cards with a hand-drawn attention circle, a compare slide, a process timeline zoomed on one step, a pause question with its answer circled, a key message, the summary and the closing slide](examples/M04-L02-script-a-video-lesson/preview/contact-01.jpg)
 
@@ -74,6 +74,18 @@ A GPU is optional: it makes the voice and Whisper faster, a CPU works. The first
 
 **Plan for about 25 minutes.** Measured on a Windows 11 laptop: `requirements.txt` took 318 s, `kokoro soundfile` 915 s (it pulls torch, and pip stays silent for minutes while it downloads; it has not hung), `npm install` 37 s. The virtual environment ends up at 1.5 GB.
 
+### Pick the voice engine
+
+The voice is not in `requirements.txt`: install the engine for the language of your lessons, into the same `.venv` (the commands below do it), or into its own environment (see [Voice engine in its own environment](#voice-engine-in-its-own-environment)).
+
+| Lessons in | Engine | Install into the `.venv` | Notes |
+|---|---|---|---|
+| English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese, Mandarin | [Kokoro-82M](https://github.com/hexgrad/kokoro) | `pip install kokoro soundfile` | Python 3.10 to 3.12 only. Pulls torch, about 1 GB and 15 minutes. Some languages also need [espeak-ng](https://github.com/espeak-ng/espeak-ng/releases) |
+| Vietnamese | [VieNeu-TTS](https://github.com/pnnbao97/VieNeu-TTS) v3 Turbo | `pip install vieneu soundfile` | Runs on the CPU without torch (ONNX Runtime). For an NVIDIA GPU see its README (CUDA torch first on Windows) |
+| Any language, your own voice | none | nothing | Record one file per narration line and use `--engine files` (see the [FAQ](#can-i-use-my-own-recorded-voice)) |
+
+Both engines are free, Apache 2.0 and run offline after the first download of the model. You only need the one you use. **Forgot to install it?** Nothing breaks: before it does any work, `make_video.py` checks that the engine loads in the Python it will use and, if not, stops and prints the exact command for your machine (and warns when that Python is 3.13 or newer, or is not a virtual environment). Claude reads that message and can finish the setup with you.
+
 ### Claude Code, one project only (recommended)
 
 The skill sits in your course project and its Python libraries go into a `.venv` in the same project, so nothing touches the rest of your machine. Run these from the project folder.
@@ -84,7 +96,8 @@ macOS or Linux (bash):
 git clone https://github.com/chuonglife/lesson-video-producer-skill .claude/skills/lesson-video-producer
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r .claude/skills/lesson-video-producer/requirements.txt
-.venv/bin/python -m pip install kokoro soundfile      # the English voice; slow, see above
+.venv/bin/python -m pip install kokoro soundfile      # English and 7 other languages; slow, see above
+# .venv/bin/python -m pip install vieneu soundfile    # Vietnamese instead (or as well)
 npm install --prefix .claude/skills/lesson-video-producer/assets/engine   # the frame renderer (puppeteer-core)
 ```
 
@@ -94,7 +107,8 @@ Windows (PowerShell):
 git clone https://github.com/chuonglife/lesson-video-producer-skill .claude\skills\lesson-video-producer
 py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r .claude\skills\lesson-video-producer\requirements.txt
-.\.venv\Scripts\python.exe -m pip install kokoro soundfile
+.\.venv\Scripts\python.exe -m pip install kokoro soundfile      # English and 7 other languages
+# .\.venv\Scripts\python.exe -m pip install vieneu soundfile    # Vietnamese instead (or as well)
 npm install --prefix .claude\skills\lesson-video-producer\assets\engine
 ```
 
@@ -109,7 +123,7 @@ git clone https://github.com/chuonglife/lesson-video-producer-skill ~/.claude/sk
 cd ~/.claude/skills/lesson-video-producer
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m pip install kokoro soundfile
+.venv/bin/python -m pip install kokoro soundfile      # or: vieneu soundfile for Vietnamese
 cd assets/engine
 npm install
 ```
@@ -120,7 +134,7 @@ Windows (PowerShell):
 git clone https://github.com/chuonglife/lesson-video-producer-skill "$HOME\.claude\skills\lesson-video-producer"
 py -3.12 -m venv "$HOME\.claude\skills\lesson-video-producer\.venv"
 & "$HOME\.claude\skills\lesson-video-producer\.venv\Scripts\python.exe" -m pip install -r "$HOME\.claude\skills\lesson-video-producer\requirements.txt"
-& "$HOME\.claude\skills\lesson-video-producer\.venv\Scripts\python.exe" -m pip install kokoro soundfile
+& "$HOME\.claude\skills\lesson-video-producer\.venv\Scripts\python.exe" -m pip install kokoro soundfile   # or: vieneu soundfile for Vietnamese
 npm install --prefix "$HOME\.claude\skills\lesson-video-producer\assets\engine"
 ```
 
@@ -136,13 +150,17 @@ If Kokoro or VieNeu lives in a separate virtual environment, point the skill at 
 
 ```bash
 export KOKORO_PYTHON=/path/to/kokoro-env/bin/python
+export VIENEU_PYTHON=/path/to/vieneu-env/bin/python
 ```
 
 PowerShell:
 
 ```powershell
 $env:KOKORO_PYTHON = "C:\path\to\kokoro-env\Scripts\python.exe"
+$env:VIENEU_PYTHON = "C:\path\to\vieneu-env\Scripts\python.exe"
 ```
+
+To keep it for every new terminal on Windows, use `setx KOKORO_PYTHON "C:\path\to\kokoro-env\Scripts\python.exe"` (then open a new terminal).
 
 Set `CHROME_PATH` the same way if Chrome, Chromium or Edge is not found. The skill runs on Windows, macOS and Linux; only the window recorder `record_screen.py` is Windows-only (use OBS or ffmpeg elsewhere).
 
@@ -153,6 +171,14 @@ Set `CHROME_PATH` the same way if Chrome, Chromium or Edge is not found. The ski
 ```
 
 On Windows: `.\.venv\Scripts\python.exe .claude\skills\lesson-video-producer\scripts\make_video.py --help`. It should print the options without an error.
+
+Then check the voice you installed (it should print `voice OK`):
+
+```bash
+.venv/bin/python -c "import kokoro, soundfile; print('voice OK')"     # Vietnamese: import vieneu, soundfile
+```
+
+On Windows: `.\.venv\Scripts\python.exe -c "import kokoro, soundfile; print('voice OK')"`. `No module named 'kokoro'` means it went into another Python: install it again with the `.venv` Python shown above, never with a bare `pip`.
 
 The slides come from [Lesson Slide Designer](https://github.com/chuonglife/lesson-slide-designer-skill): `slides.json`, the `.pptx` and the `_preview/slide-NN.png` images.
 
