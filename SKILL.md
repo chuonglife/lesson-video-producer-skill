@@ -27,6 +27,8 @@ Tools: Python 3.10 to 3.12 (Kokoro does not install on 3.13+) with `python-pptx`
 
 **Which Python to run.** If the project has a `.venv` folder, run every script with that environment's Python: `.venv/Scripts/python` on Windows, `.venv/bin/python` elsewhere (or the `.venv` inside this skill folder if the user installed it there). Otherwise use `python`. The `python scripts/...` commands below mean that interpreter. `make_video.py` starts the other scripts with the same Python it was started with, so the whole run stays in the environment. If an import fails (`kokoro`, `faster_whisper`, `pptx`), you are on the wrong Python; do not `pip install` into the system Python, point at the venv instead.
 
+**When the voice engine is not installed at all.** `make_video.py` checks the voice before step 1 and stops with the exact fix when `kokoro` (or `vieneu`) cannot be imported. Look for an existing environment first (`.venv` in the project or in this skill folder, `KOKORO_PYTHON`, `VIENEU_PYTHON`). If there is none, tell the user the voice is missing and set it up with them: a Python 3.12 virtual environment inside this skill folder (`py -3.12 -m venv .venv` on Windows, `python3.12 -m venv .venv` elsewhere), then `requirements.txt` and `pip install kokoro soundfile` into it, run in the background (about 25 minutes the first time, pip is silent while torch downloads), then rerun with that Python. If installing is not possible, offer `--engine files --voice <folder>` with the user's own recordings (one file per narration line). `--engine edge` only tests the pipeline; never deliver a course video made with it.
+
 ## Workflow
 
 ### Step 0. Read the deck and settle the brief

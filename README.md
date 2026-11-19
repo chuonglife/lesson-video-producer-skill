@@ -248,6 +248,10 @@ Kokoro-82M (English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portug
 
 No paid service at all. A GPU speeds up the voice and Whisper; on a CPU a 5-minute lesson still renders in reasonable time.
 
+### What if Kokoro is not installed?
+
+Nothing is lost. Before it does any work, `make_video.py` checks that the voice engine can be loaded. If it cannot, it stops and prints the fix for your machine: the `pip install kokoro soundfile` command for the Python it found, a warning when that Python is 3.13 or newer (Kokoro needs 3.10 to 3.12), and how to point it at another environment with `KOKORO_PYTHON`. Claude reads that message and can set up the environment with you. If you cannot install it, use your own recordings (next question).
+
 ### Can I use my own recorded voice?
 
 Yes. Record one file per line of `<lesson>.narration.txt` (`001.wav`, `002.wav`, ...) and run `make_video.py ... --engine files --voice <that folder>`. The skill adds the pauses, the timing, the reveals and the soundtrack exactly as with a synthetic voice.

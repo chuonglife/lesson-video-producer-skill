@@ -54,6 +54,45 @@ def duration(p):
     return float(r.stdout.strip() or 0)
 
 
+VOICE_MODULES = {"kokoro": "kokoro, soundfile", "vieneu": "vieneu", "edge": "edge_tts"}
+
+
+def check_voice_engine(engine, py_tts):
+    """Stop before step 1 when the voice engine is not installed, with the exact fix, instead of failing at step 2."""
+    if engine not in VOICE_MODULES:
+        return
+    probe = subprocess.run([py_tts, "-c", "import sys; print('%d.%d' % sys.version_info[:2]); print(int(sys.prefix != sys.base_prefix)); "
+                            f"import {VOICE_MODULES[engine]}"], capture_output=True, text=True)
+    if probe.returncode == 0:
+        return
+    out = probe.stdout.strip().splitlines() + ["?", "?"]
+    ver, in_venv = out[0], out[1] == "1"
+    env = {"kokoro": "KOKORO_PYTHON", "vieneu": "VIENEU_PYTHON"}.get(engine)
+    msg = [f"The {engine} voice is not installed in this Python: {py_tts} (Python {ver})."]
+    if engine == "kokoro":
+        too_new = ver != "?" and tuple(map(int, ver.split("."))) >= (3, 13)
+        if too_new or not in_venv:
+            why = "Kokoro does not install on Python 3.13 or newer" if too_new else "this is not a virtual environment"
+            venv_py = ".venv\\Scripts\\python.exe" if os.name == "nt" else ".venv/bin/python"
+            msg.append(f"{why}: create a Python 3.12 environment in the skill folder first "
+                       f"({'py -3.12' if os.name == 'nt' else 'python3.12'} -m venv .venv), install requirements.txt into it, "
+                       f"then run make_video.py with {venv_py}.")
+            target = venv_py
+        else:
+            target = py_tts
+        msg.append(f"Install the voice once (about 15 minutes, pulls torch; pip stays silent while it downloads): "
+                   f"\"{target}\" -m pip install kokoro soundfile")
+    elif engine == "vieneu":
+        msg.append("Install VieNeu-TTS from its repository (usually in its own virtual environment).")
+    else:
+        msg.append(f"\"{py_tts}\" -m pip install edge-tts")
+    if env:
+        msg.append(f"If it is installed in another environment, set {env} to that python.exe.")
+    msg.append("No install possible? Use your own recordings: --engine files --voice <folder with 001.wav, 002.wav, ...> "
+               "(or --engine edge to test the pipeline only; do not publish with it).")
+    raise SystemExit("\n".join(msg))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("slides")
@@ -88,6 +127,8 @@ def main():
     py_tts = {"kokoro": os.environ.get("KOKORO_PYTHON", py), "vieneu": os.environ.get("VIENEU_PYTHON", py), "edge": py, "files": py}[engine]
     if not Path(py_tts).is_file():
         raise SystemExit(f"Python for {engine} not found: {py_tts}")
+    if a.from_step <= 3:
+        check_voice_engine(engine, py_tts)
     f = lambda ext: out / f"{name}{ext}"
     narration, board, voice, tl, events, audio, base, final = (f(".narration.txt"), f(".storyboard.json"), f(".voice.mp3"), f(".timeline.json"),
                                                               f(".events.json"), f(".audio.mp3"), f(".base.mp4"), f(".mp4"))

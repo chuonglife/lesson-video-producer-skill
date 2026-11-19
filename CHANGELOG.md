@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A missing voice engine stops the run before step 1, with the fix.** Without Kokoro the run used to build the storyboard and then fail at step 2 with `ModuleNotFoundError: No module named 'kokoro'`. `make_video.py` now imports the engine (`kokoro` + `soundfile`, `vieneu` or `edge_tts`) in the Python it will use and, if that fails, prints the install command for that Python, tells you to create a 3.12 virtual environment first when that Python is 3.13 or newer or not a virtual environment, names `KOKORO_PYTHON` / `VIENEU_PYTHON`, and offers `--engine files` with your own recordings. SKILL.md tells Claude how to set the voice up with the user; the README FAQ answers "What if Kokoro is not installed?".
+
 ## v1.2.0 - 2026-11-17
 
 Fixes and features from recording a real course with `record_actions.py`: every item below comes from a take that failed or a video a learner could not follow. Videos without a long take render exactly as before (checked on the example lesson: storyboard and narration byte-identical; a long take without inserts renders frame-identical with identical metrics).
