@@ -6,7 +6,7 @@ The most important rule: **run it, measure it, look at it before handing it over
 
 | Item | Threshold | Hard failure? |
 |---|---|---|
-| Size, frame rate, codec | 1920x1080, 30 fps, H.264 yuv420p, AAC present | yes |
+| Size, frame rate, codec | 1920x1080, 30 fps, H.264 yuv420p limited range (a full-range `yuvj420p` file fails), AAC present | yes |
 | Length | matches `timeline.json` within 1 s | yes |
 | Integrated loudness | -20 to -15 LUFS | yes |
 | True peak | at most -1 dBTP | yes |

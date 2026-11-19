@@ -213,15 +213,26 @@ def strict_terms(text, lang):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("mp3"); ap.add_argument("narration")
     ap.add_argument("--lang", default="en"); ap.add_argument("--out"); ap.add_argument("--exceptions")
     ap.add_argument("--timeline"); ap.add_argument("--only-lines", dest="only_lines")
     a = ap.parse_args()
-    import ctranslate2
-    from faster_whisper import WhisperModel
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
+    try:
+        import ctranslate2
+        from faster_whisper import WhisperModel
+    except ImportError as e:
+        raise SystemExit(f"faster-whisper is missing in {sys.executable} ({e}). Install it: \"{sys.executable}\" -m pip install faster-whisper "
+                         "(it is in requirements.txt), or run with the Python of the project's .venv.")
     dev = os.environ.get("WHISPER_DEVICE") or ("cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu")
     name = os.environ.get("WHISPER_MODEL", "large-v3")
+    size = {"large-v3": "3.1 GB", "medium": "1.5 GB", "small": "0.5 GB"}.get(name)
+    print(f"loading Whisper {name} on {dev}" + (f" (the first run downloads {size}; nothing is printed while it downloads)" if size else "")
+          + ("; on a CPU large-v3 needs several GB of free memory and is slow: WHISPER_MODEL=medium is the lighter choice"
+             if dev == "cpu" and name == "large-v3" else ""), flush=True)
     model = None
     if dev == "cuda":
         try:

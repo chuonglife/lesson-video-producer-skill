@@ -65,7 +65,7 @@ def piano(m, vel, dur, rng):
     return out / 6.0
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", help="output .wav")
     ap.add_argument("--seconds", type=float, default=240)
     ap.add_argument("--bpm", type=float, default=66)

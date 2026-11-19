@@ -1058,6 +1058,8 @@ def main():
     p = sub.add_parser("first-frame"); p.add_argument("clip"); p.add_argument("--config")
     p = sub.add_parser("fit"); p.add_argument("board"); p.add_argument("timeline"); p.add_argument("video_json")
     a = ap.parse_args()
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
     if a.cmd == "analyse":
         analyse(a)
     elif a.cmd == "render":

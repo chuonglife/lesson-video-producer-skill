@@ -48,7 +48,7 @@ The slide skill already orders the deck; this skill **checks** it. A missing `qu
 
 ## 6. Platform specifications (checked in 2026)
 
-- At least 720p; this skill renders 1080p, 30 fps, H.264 yuv420p, AAC 48 kHz 192 kbps, `+faststart`.
+- At least 720p; this skill renders 1080p, 30 fps, H.264 yuv420p (limited range, BT.709, tagged in the stream), AAC 48 kHz 192 kbps, `+faststart`.
 - Udemy paid courses: at least 30 minutes of video and at least 5 lectures; measure real files, never estimate.
 - Audio: Udemy publishes no loudness number, only clear, clean, stereo and consistent across lectures. Internal target: -20 to -15 LUFS integrated, true peak at most -1 dBTP, lectures within 1.5 LU of each other.
 - Captions: WebVTT only; replacing a video removes its captions, upload them again.

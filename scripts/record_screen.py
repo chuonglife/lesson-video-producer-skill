@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-RECORD ONE WINDOW for a how-to or hands-on lesson, with smooth scrolling. Windows 10/11 (ffmpeg gfxcapture).
+RECORD ONE WINDOW for a how-to or hands-on lesson, with smooth scrolling. Windows 10/11, ffmpeg 8.1 or newer (the gfxcapture filter).
 On macOS or Linux record with OBS or ffmpeg (avfoundation / x11grab) instead; check_motion.py, smooth_scroll.py and
 composite_clips.py work with any recording.
 
@@ -53,8 +53,12 @@ except Exception:
 if sys.platform != "win32":
     raise SystemExit("record_screen.py needs Windows (ffmpeg gfxcapture). On macOS/Linux record with OBS or ffmpeg, "
                      "then use check_motion.py, smooth_scroll.py and composite_clips.py on the clip.")
-import win32con  # noqa: E402  (pywin32)
-import win32gui  # noqa: E402
+try:
+    import win32con  # noqa: E402  (pywin32)
+    import win32gui  # noqa: E402
+except ImportError:
+    raise SystemExit(f"pywin32 is missing in {sys.executable}. Install it: \"{sys.executable}\" -m pip install pywin32 "
+                     "(it is in requirements.txt), or run with the Python of the project's .venv.")
 
 HERE = Path(__file__).resolve().parent
 user32 = ctypes.windll.user32
@@ -275,7 +279,7 @@ def write_log(out, log, t0_frame, rect, crop_top, size, w_out, h_out):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", nargs="?")
     ap.add_argument("--window"); ap.add_argument("--seconds", type=float, default=30)
     ap.add_argument("--crop-top", dest="crop_top", type=int, default=0)
@@ -291,6 +295,13 @@ def main():
         list_windows(); return
     if not a.out or not a.window:
         raise SystemExit("Give <out.mp4> and --window (see --list).")
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
+    filters = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+    if "gfxcapture" not in filters:
+        raise SystemExit("This ffmpeg has no gfxcapture filter (the Windows window capture). It came with ffmpeg 8.1: update ffmpeg "
+                         "(winget upgrade Gyan.FFmpeg, or winget install Gyan.FFmpeg), open a new terminal and run again. "
+                         "Or record the window with OBS and continue with check_motion.py.")
     hwnd = find_window(a.window)
     if not hwnd:
         raise SystemExit(f"No window whose title contains: {a.window}")

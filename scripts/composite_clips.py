@@ -136,6 +136,9 @@ def self_test():
 def main():
     if len(sys.argv) < 2 or (len(sys.argv) < 6 and sys.argv[1] not in ("--first-frame", "--self-test")):
         print(__doc__); sys.exit(0 if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help") else 2)
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
     if sys.argv[1] == "--self-test":
         self_test(); return
     if sys.argv[1] == "--first-frame":

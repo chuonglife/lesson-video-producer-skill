@@ -9,4 +9,5 @@ _check/zoom/
 *.tmp.mp4
 *.tmp.wav
 videos/
+examples/*/video/
 slides/

@@ -528,8 +528,13 @@ def main():
     src = os.path.abspath(sys.argv[1])
     args = sys.argv[2:]
     base = os.path.dirname(src)
-    with open(src, encoding="utf-8") as f:
-        spec = normalise(json.load(f))
+    if not os.path.isfile(src):
+        raise SystemExit(f"slides.json not found: {src}")
+    try:
+        with open(src, encoding="utf-8-sig") as f:
+            spec = normalise(json.load(f))
+    except ValueError as e:
+        raise SystemExit(f"{src} is not valid JSON: {e}")
     name = spec.get("file_name") or os.path.splitext(os.path.basename(src))[0]
     if "--out" in args:
         out = os.path.abspath(args[args.index("--out") + 1])
@@ -538,8 +543,19 @@ def main():
         out = "/".join(parts[:parts.index("slides")] + ["videos"] + parts[parts.index("slides") + 1:]) if "slides" in parts \
             else os.path.join(base, "video")
     os.makedirs(out, exist_ok=True)
-    ov_path = os.path.abspath(args[args.index("--overrides") + 1]) if "--overrides" in args else os.path.join(out, "video.json")
-    overrides = json.load(open(ov_path, encoding="utf-8")) if os.path.isfile(ov_path) else {}
+    # video.json: --overrides, else the output folder, else next to slides.json. Clip paths in it are relative to its own folder.
+    if "--overrides" in args:
+        ov_path = os.path.abspath(args[args.index("--overrides") + 1])
+    else:
+        ov_path = next((p for p in (os.path.join(out, "video.json"), os.path.join(base, "video.json")) if os.path.isfile(p)),
+                       os.path.join(out, "video.json"))
+    ov_dir = os.path.dirname(ov_path)
+    try:
+        overrides = json.load(open(ov_path, encoding="utf-8-sig")) if os.path.isfile(ov_path) else {}
+    except ValueError as e:
+        raise SystemExit(f"{ov_path} is not valid JSON: {e}")
+    if overrides:
+        print(f"overrides: {ov_path}")
     pptx = os.path.join(base, name + ".pptx")
     if not os.path.isfile(pptx):
         raise SystemExit(f"Missing {pptx}: build the deck first (lesson-slide-designer: build_slides.py).")
@@ -561,7 +577,7 @@ def main():
         if not os.path.isfile(png):
             raise SystemExit(f"Missing {png}: run render_slides.py again.")
         lines = narration_lines(d)
-        lt_info, lt_pause = long_take_of_slide(sid, ov, out)
+        lt_info, lt_pause = long_take_of_slide(sid, ov, ov_dir)
         if lt_info:
             lines = lt_info.pop("_lines")
         lines = lines or ["."]   # a silent slide gets a short silence from the voice step
@@ -586,7 +602,7 @@ def main():
         if covers_clip:
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from long_take import first_frame
-            clip_path = clip_cfg["file"] if os.path.isabs(clip_cfg["file"]) else os.path.join(out, clip_cfg["file"])
+            clip_path = clip_cfg["file"] if os.path.isabs(clip_cfg["file"]) else os.path.join(ov_dir, clip_cfg["file"])
             png = str(first_frame(clip_path, lt_info["config"]))
             items, static = [], []
         transition = None if i == 1 else pick_transition(stype, previous, ov)

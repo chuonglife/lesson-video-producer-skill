@@ -67,13 +67,15 @@ def thin(events):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("voice"); ap.add_argument("events"); ap.add_argument("out")
     ap.add_argument("--music", default=str(ASSETS / "music" / "piano-bed.mp3"))
     ap.add_argument("--no-music", action="store_true")
     ap.add_argument("--no-sfx", action="store_true")
     ap.add_argument("--music-db", type=float, default=-28)  # -22 sounded loud under the voice
     a = ap.parse_args()
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
     plan = json.loads(Path(a.events).read_text(encoding="utf-8"))
     dur = float(plan["duration"])
     n = int((dur + 0.5) * SR)

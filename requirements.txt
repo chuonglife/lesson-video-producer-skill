@@ -4,7 +4,9 @@ numpy>=1.24
 Pillow>=9.0
 opencv-python>=4.8      # smooth_scroll.py (screen recordings)
 faster-whisper>=1.0     # review_voice.py (Whisper check of the narration)
-pywin32>=306; sys_platform == "win32"   # record_screen.py (Windows window recorder)
+pywin32>=306; sys_platform == "win32"   # record_screen.py, record_actions.py (Windows window recorder)
+comtypes>=1.4; sys_platform == "win32"  # record_actions.py: reads the terminal text (masks private text, answers prompts)
 # Voice engines (install in this environment or in their own, then set KOKORO_PYTHON / VIENEU_PYTHON):
-#   kokoro>=0.9  soundfile    -> English and 8 other languages (Python 3.10-3.12; pulls torch, about 1 GB)
+#   kokoro>=0.9  soundfile    -> English and 7 other languages (Python 3.10-3.12; pulls torch, about 1 GB)
+#       Japanese also needs "misaki[ja]" (a C++ compiler on Windows), Mandarin "misaki[zh]"
 #   vieneu       soundfile    -> Vietnamese (VieNeu-TTS v3 Turbo; CPU without torch, GPU: see its repository)

@@ -7,7 +7,7 @@ Usage:  python check_video.py <video.mp4> [--timeline <timeline.json>] [--events
                               [--out <report.md>]
 
 Measures against the thresholds in references/quality-checks.md:
-  1. Picture: 1920x1080, 30 fps, H.264 yuv420p, length matches the timeline (within 1 s).
+  1. Picture: 1920x1080, 30 fps, H.264 yuv420p limited range (full range fails), length matches the timeline (within 1 s).
   2. Sound: integrated loudness -20 to -15 LUFS, true peak at most -1 dBTP, both channels present, no silence over 12 s
      except the pauses left for learners (gaps over 3 s between narration lines).
   3. Motion: nothing stands still for more than 25 s (frame difference sampled every second, learner pauses excepted);
@@ -132,7 +132,7 @@ def ff_log(args):
 
 
 def probe(f):
-    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height,r_frame_rate,pix_fmt,codec_name,channels:format=duration",
+    r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type,width,height,r_frame_rate,pix_fmt,color_range,codec_name,channels:format=duration",
                         "-of", "json", str(f)], capture_output=True, text=True, check=True)
     return json.loads(r.stdout)
 
@@ -188,9 +188,11 @@ def contact_sheets(video, slides, folder):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("video"); ap.add_argument("--timeline"); ap.add_argument("--events"); ap.add_argument("--storyboard"); ap.add_argument("--out")
     a = ap.parse_args()
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
     v = Path(a.video)
     errors, warnings, facts = [], [], []
     info = probe(v)
@@ -203,6 +205,9 @@ def main():
         errors.append("not 1920x1080")
     if abs(fps - 30) > 0.5:
         errors.append(f"{fps:.1f} fps instead of 30")
+    if vs.get("pix_fmt") != "yuv420p" or vs.get("color_range") == "pc":
+        errors.append(f"pixel format {vs.get('pix_fmt')} (range {vs.get('color_range', 'not set')}) instead of yuv420p limited range: "
+                      "some players show full-range video washed out or too dark; render again with make_video.py --from-step 6 --full-render")
     if not au:
         errors.append("no audio track")
     pauses = []

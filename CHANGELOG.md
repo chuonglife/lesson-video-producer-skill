@@ -1,5 +1,43 @@
 # Changelog
 
+## v1.2.2 - 2026-11-19
+
+Fixes from an audit that followed the README on a clean machine: every item below stopped a new user or gave a wrong result.
+
+### A new user can now get a video
+
+- **The example deck is complete and runs from the repository.** `examples/M04-L02-script-a-video-lesson/` had `slides.json` but no `.pptx` and no slide images, so the only example stopped at step 1 with "Missing ...pptx". It now carries the `.pptx` and `_preview/slide-01..17.png` (1.7 MB, built with Lesson Slide Designer v1.3.1), and its `slides.json` is the one the deck was built from. README has a "Try it" command in bash and PowerShell.
+- **The Lesson Slide Designer prerequisite is stated up front.** README said "You give Claude a slide deck" and "Turn my Udemy lecture deck into the final video", which reads as any PowerPoint. The Install section, the table and SKILL.md now say that the deck must come from that skill (`slides.json` + `.pptx` + `_preview/`), and that LibreOffice and Poppler are what it uses to make the previews. They were listed as optional.
+- **One preflight before step 1.** `make_video.py` now checks `node`, `ffmpeg`, `ffprobe`, the browser (`CHROME_PATH`), the renderer's `node_modules`, the Python libraries, the voice engine and `--engine files` without `--voice`. Each message names the item, gives the install command for Windows, macOS and Linux and says to open a new terminal. Before, a missing Node or ffmpeg ended in `FileNotFoundError: [WinError 2]` with no hint of what was missing. New `scripts/preflight.py` holds the shared check; `make_voice.py`, `review_voice.py`, `mix_audio.py`, `composite_clips.py`, `check_video.py`, `check_motion.py`, `smooth_scroll.py`, `long_take.py`, the recorders and `render.mjs` use it or give the same message, so none of them shows a traceback for a missing program. A missing or invalid `slides.json` and `video.json` get a plain message too.
+- **Japanese and Mandarin.** `pip install kokoro soundfile` is not enough for them: the run passed the voice check and failed at step 2 with `No module named 'pyopenjtalk'` or `'ordered_set'`. The table now gives `pip install "misaki[zh]"` and `"misaki[ja]"`, the preflight imports the extra when the voice is Japanese or Mandarin and prints that command, and the Japanese message says what Windows needs (Visual Studio Build Tools with the C++ workload: `pyopenjtalk` is built from source). Mandarin was run after the fix; Japanese on Windows was not.
+- **The voice follows the language.** A deck with `"language": "es"` was read by the US English voice `am_michael`. The default voice now comes from the language (`es` ef_dora, `fr` ff_siwis, `hi` hf_alpha, `it` if_sara, `ja` jf_alpha, `pt` pf_dora, `zh` zf_xiaobei); `--voice` still wins; a language neither engine speaks stops the run with the choices.
+- **An existing `.venv` is found.** Started with a bare `python`, the voice message told the user to create an environment "in the skill folder" and install for 25 minutes, even when the project's `.venv` already had the voice. It now looks in the current folder and in the skill folder, names the Python to use, and prints full paths in every command.
+
+### True sizes and waits
+
+- README said the first video downloads "a few hundred MB" and needs "about 3 GB free". Measured: Whisper large-v3 3.1 GB, Kokoro 330 MB (plus a 13 MB spaCy model it installs by itself), VieNeu 580 MB, the environment 1.5 GB, so about 6 GB. Nothing is printed while a model downloads; the first Kokoro line took 17 minutes on a shared connection.
+- `WHISPER_MODEL`, `WHISPER_DEVICE` and `CUDA_DLL_DIRS` were in the code only. They are now in README ("Whisper settings") and `references/narration-voice.md`, with when `medium` is acceptable (no NVIDIA GPU or under 16 GB of RAM) and that `small` is for tests. The default stays `large-v3`.
+- Step 3 prints its banner (`=== 3/9 voice review ===`) and `loading Whisper <model> on <device>` with the download size. It used to start without a word.
+- The espeak-ng note is gone: Spanish and French worked on a clean Windows install without it, because the pip package carries it.
+- `requirements.txt` said "8 other languages" for Kokoro: seven.
+
+### Recording
+
+- **`comtypes` is in `requirements.txt`.** `record_actions.py` reads the terminal through UI Automation, which needs it. Without it the script printed one line and went on: no private-text masks, no answers to prompts, no stop on "is not recognized". Now the recording is refused ("RECORDING REFUSED") when the scan is on and UI Automation is not available; `"scan_private": false` in the action script is the only way to record without it. `--dry-run` prints a warning.
+- `record_screen.py` checks that ffmpeg has the `gfxcapture` filter (ffmpeg 8.1 or newer) and gives the upgrade command; README and the reference state the minimum version.
+- `templates/actions.example.json` used file names the sibling skills do not write. It now uses `lessons/<course>/<lesson>/01_Learning_Objectives.md` and `assessments/<course>/<lesson>/01_Test_Blueprint.md`.
+
+### Picture
+
+- **The video is yuv420p, limited range, BT.709, tagged.** The frames are JPEG screenshots (full range, BT.601) and were encoded without a conversion, so the file came out `yuvj420p` / `bt470bg` although the docs said `yuv420p`; some players and platforms show such a file washed out or too dark. `render.mjs` now converts and tags the stream. Checked on the same deck and timeline before and after: the main colours differ by at most one level out of 255 from the old render and two from the slide image (navy 20,33,61 decoded as 19,33,60 before and 19,32,59 now; the accent 252,163,17 is exact in both), which is the rounding of 8-bit limited-range video, not a visible shift. Segments cached by an older version are rendered again once (the encode version is part of the segment hash).
+- `check_video.py` now fails a `yuvj420p` or full-range file, as `references/quality-checks.md` already claimed.
+
+### Smaller things
+
+- `video.json` is read from the output folder and, when there is none, from the folder of `slides.json` (the example keeps it there). Clip paths in it are relative to the folder it is in, in all four scripts that read it.
+- `--help` works in every script with exit code 0 and no side effect: `make_sfx.py --help` regenerated all the sounds, `gpu_lock.py --help` returned 2, `insert_artifacts.py --help` printed nothing. Scripts with options now print their full description.
+- README: the Claude desktop app section said to upload the `.skill` and run `npm install` in a folder that does not exist on the user's machine. It now says the truth: Claude Code, which includes the Code tab of the desktop app. Prerequisite commands for macOS and Debian/Ubuntu. A short "If something stops" list, including the shared lock file `~/.gpu-lock/gpu.lock`. The example video link points at the v1.0.0 asset (later releases did not carry the mp4).
+
 ## v1.2.1 - 2026-11-19
 
 - **A missing voice engine stops the run before step 1, with the fix.** Without Kokoro the run used to build the storyboard and then fail at step 2 with `ModuleNotFoundError: No module named 'kokoro'`. `make_video.py` now imports the engine (`kokoro` + `soundfile`, `vieneu` or `edge_tts`) in the Python it will use and, if that fails, prints the install command for that Python, tells you to create a 3.12 virtual environment first when that Python is 3.13 or newer or not a virtual environment, names `KOKORO_PYTHON` / `VIENEU_PYTHON`, and offers `--engine files` with your own recordings. SKILL.md tells Claude how to set the voice up with the user.

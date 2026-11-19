@@ -537,3 +537,12 @@ def _insert_point(it, segs):
         if d.get("mark") == v:
             return float(d["to"] if "after_end_of" in it else d["from"])
     raise SystemExit(f"insert_artifacts: no segment has the mark '{v}'")
+
+
+if __name__ == "__main__":
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    print(__doc__)   # a library of long_take.py: nothing to run, the docstring lists every field of an insert

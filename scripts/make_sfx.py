@@ -131,12 +131,21 @@ def save(path, x):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    out = Path(args[0] if args else Path(__file__).resolve().parent.parent / "assets" / "sfx")
+    argv = sys.argv[1:]
+    if "-h" in argv or "--help" in argv:
+        print(__doc__); return
+    audition = None
+    if "--audition" in argv:
+        k = argv.index("--audition")
+        if k + 1 >= len(argv):
+            raise SystemExit("--audition needs a file name, for example --audition audition.wav")
+        audition = argv[k + 1]
+        del argv[k:k + 2]
+    unknown = [x for x in argv if x.startswith("-")]
+    if unknown or len(argv) > 1:
+        raise SystemExit(f"Unknown arguments: {' '.join(unknown or argv[1:])}. Usage: python make_sfx.py [out-folder] [--audition audition.wav]")
+    out = Path(argv[0] if argv else Path(__file__).resolve().parent.parent / "assets" / "sfx")
     out.mkdir(parents=True, exist_ok=True)
-    nghe = None
-    if "--audition" in sys.argv:
-        nghe = sys.argv[sys.argv.index("--audition") + 1]
     E5, G5, A5, C6, D6 = 659.26, 783.99, 880.0, 1046.5, 1174.66
 
     lib = {}
@@ -170,15 +179,15 @@ def main():
     for k, v in lib.items():
         save(out / f"{k}.wav", v)
         print(f"{k}.wav  {len(v) / SR:.2f}s")
-    if nghe:
+    if audition:
         order = ["ui1", "ui2", "ui3", "pop1", "pop2", "click", "swoosh", "circle", "underline", "whoosh", "transition", "typing", "ting", "success"]
         parts = [lib[k] for k in order]
         gaps, t = [], 0.0
         for p in parts:
             gaps.append(t)
             t += len(p) / SR + 0.55
-        save(Path(nghe), seq(parts, gaps))
-        print("wrote", nghe)
+        save(Path(audition), seq(parts, gaps))
+        print("wrote", audition)
 
 
 if __name__ == "__main__":

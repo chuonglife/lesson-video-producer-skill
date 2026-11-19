@@ -11,6 +11,7 @@ Engines (all local except edge):
   kokoro  Kokoro-82M, Apache 2.0, runs on CPU or GPU. Default voice am_michael (US male); af_heart is a strong female voice.
           The first letter of the voice picks the language: a US English, b UK English, e Spanish, f French, h Hindi,
           i Italian, j Japanese, p Brazilian Portuguese, z Mandarin. pip install kokoro soundfile (Python 3.10-3.12).
+          Mandarin also needs pip install "misaki[zh]"; Japanese pip install "misaki[ja]" (a C++ compiler on Windows).
   vieneu  VieNeu-TTS v3 Turbo, Apache 2.0, Vietnamese. Default voice "Hải Đăng". Always --pace slow: this model must
           not be time-stretched (atempo makes it sound like a slowed-down tape); slow pace keeps the model's own speed
           and leaves longer pauses between lines instead.
@@ -308,7 +309,7 @@ async def main(a):
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser()
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("narration"); p.add_argument("out_mp3"); p.add_argument("timeline")
     p.add_argument("--engine", default="kokoro", choices=["kokoro", "vieneu", "edge", "files"])
     p.add_argument("--pace", default=None, choices=["natural", "slow", "even"])
@@ -316,4 +317,17 @@ if __name__ == "__main__":
     a = p.parse_args()
     if a.pace is None:
         a.pace = "slow" if a.engine in ("vieneu", "files") else "natural"
-    asyncio.run(main(a))
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
+    if not Path(a.narration).is_file():
+        raise SystemExit(f"narration file not found: {a.narration} (storyboard.py writes it)")
+    try:
+        asyncio.run(main(a))
+    except ModuleNotFoundError as e:
+        extra = {"pyopenjtalk": 'Japanese voices need: pip install "misaki[ja]" (on Windows: Visual Studio Build Tools with the C++ workload first).',
+                 "ordered_set": 'Mandarin voices need: pip install "misaki[zh]".', "jieba": 'Mandarin voices need: pip install "misaki[zh]".',
+                 "pypinyin": 'Mandarin voices need: pip install "misaki[zh]".', "cn2an": 'Mandarin voices need: pip install "misaki[zh]".'}
+        raise SystemExit(f"The Python module '{e.name}' is missing in {sys.executable}. "
+                         + extra.get(e.name or "", f"The {a.engine} voice is not (fully) installed in this Python.")
+                         + " Run make_video.py: it checks the voice before it starts and prints the exact command for this machine.")

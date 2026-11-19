@@ -82,4 +82,6 @@ if __name__ == "__main__":
         print(__doc__); sys.exit(0 if a else 2)
     if len(a) > 1 and not (len(a) >= 6 and a[1] == "region"):
         sys.exit("Usage: check_motion.py <video> [region X Y W H]")
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
     sys.exit(main(a[0], tuple(int(v) for v in a[2:6]) if len(a) >= 6 else None))

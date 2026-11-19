@@ -319,7 +319,7 @@
     {
       "type": "closing",
       "video": 4,
-      "action": "Write the script for one lesson of your course, then check it against the ten-point list.",
+      "action": "Write the script for one lesson of your course, then check it against the ten-point list within seven days.",
       "next_lesson": "Module 4, Lesson 3: record and edit",
       "narration": "Your next step.\nOpen the script template and write the script for one lesson of your course.\nRead it aloud, time it, then check it against the ten-point list.\nYou have seven days.\nIn the next lesson we record and edit exactly this script."
     }

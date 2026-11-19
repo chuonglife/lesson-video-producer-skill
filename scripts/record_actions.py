@@ -50,7 +50,9 @@ The action script (paths are relative to the script file; see templates/actions.
 Outputs next to the clip: <out>.mp4, <out>.events.jsonl (action log), <out>.take.json (marks, reading segments, masks,
 zoom), then long_take.py analyse runs -> <out>.longtake.json + the action table.
 Privacy: before and during the recording the visible terminal text is scanned 3 times a second; emails, API keys and
-paths with the Windows user name become timed masks.
+paths with the Windows user name become timed masks. The scan reads the terminal through UI Automation (the comtypes
+package, in requirements.txt). When it is not available the script REFUSES to record instead of recording unmasked;
+"scan_private": false in the action script turns the scan off on purpose (then only the fixed "masks" apply).
 Focus: before every step the recorded window is brought to the front (synthetic Alt, AttachThreadInput,
 SwitchToThisWindow, a click on its own title bar, up to 6 tries); if it still is not in front the script STOPS without
 sending a key. A PowerShell window loads the PATH of this process and the registry, aliases 'claude' to the real
@@ -59,6 +61,7 @@ Close leftover recording windows with close_recording_windows.py before a new ta
 """
 import argparse
 import ctypes
+import importlib.util
 import json
 import os
 import random
@@ -79,7 +82,11 @@ if sys.platform != "win32":
     raise SystemExit("record_actions.py needs Windows (Windows Terminal, SendInput, UI Automation).")
 HERE = Path(__file__).resolve().parent
 ctypes.windll.shcore.SetProcessDpiAwareness(2)
-import win32gui  # noqa: E402  (pywin32, after DPI awareness)
+try:
+    import win32gui  # noqa: E402  (pywin32, after DPI awareness)
+except ImportError:
+    raise SystemExit(f"pywin32 is missing in {sys.executable}. Install it: \"{sys.executable}\" -m pip install pywin32 comtypes "
+                     "(both are in requirements.txt), or run with the Python of the project's .venv.")
 
 u = ctypes.windll.user32
 VK = {"enter": 0x0D, "tab": 0x09, "esc": 0x1B, "escape": 0x1B, "backspace": 0x08, "space": 0x20, "delete": 0x2E, "insert": 0x2D,
@@ -529,12 +536,19 @@ def open_window(w, base):
 
 # ---------------------------------------------------------------- run
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("script"); ap.add_argument("--dry-run", dest="dry_run", action="store_true")
     ap.add_argument("--skip-review", dest="skip_review", help="waive the review_result rule, with a REASON")
     a = ap.parse_args()
     sp = Path(a.script).resolve(); base = sp.parent
-    script = json.loads(sp.read_text(encoding="utf-8"))
+    if not sp.is_file():
+        raise SystemExit(f"action script not found: {sp}")
+    try:
+        script = json.loads(sp.read_text(encoding="utf-8-sig"))
+    except ValueError as e:
+        raise SystemExit(f"{sp} is not valid JSON: {e}")
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
     errors = check_private(script)
     if errors:
         raise SystemExit("SCRIPT REFUSED (private text in typed strings):\n" + "\n".join(errors))
@@ -551,11 +565,27 @@ def main():
     if waived:
         print("review_result rule WAIVED, reason:", waived)
     hide = bool(script.get("hide_typing", True)) or any(b.get("secret") for b in script["steps"])
+    # The private-text scan (emails, API keys, C:\Users\<name> masked while on screen) reads the terminal through UI Automation,
+    # which needs comtypes. Without it nothing would be masked, so a recording is refused unless the script opts out.
+    scan_on = bool(script.get("scan_private", True))
+    no_uia = ("the terminal text cannot be read (UI Automation), so private text on screen (emails, API keys, C:\\Users\\<name>) would NOT "
+              "be masked, prompts would not be answered and a command that is not found would not stop the take. "
+              f"Install comtypes: \"{sys.executable}\" -m pip install comtypes (it is in requirements.txt). To record without the scan on "
+              "purpose, set \"scan_private\": false in the action script and cover private areas with \"masks\".")
+    if scan_on and importlib.util.find_spec("comtypes") is None:
+        if not a.dry_run:
+            raise SystemExit("RECORDING REFUSED: comtypes is not installed, so " + no_uia)
+        print("WARNING (dry run): comtypes is not installed, so " + no_uia)
+    if not scan_on:
+        print("private-text scan is OFF (\"scan_private\": false): only the fixed \"masks\" of the script are applied")
     out = Path(script["out"]); out = out if out.is_absolute() else base / out
     out.parent.mkdir(parents=True, exist_ok=True)
     hwnd, title, win = open_window(script.get("window") or {}, base)
     tt = TermText(hwnd)
     print(f"window '{title}' {frame_rect(hwnd)}; terminal text: {'yes (UI Automation)' if tt.ok else 'no, still waits only'}")
+    if scan_on and not tt.ok and not a.dry_run:
+        win32gui.PostMessage(hwnd, 0x10, 0, 0)
+        raise SystemExit("RECORDING REFUSED: UI Automation did not start for the recorded window (see the line above), so " + no_uia)
     wait_still(hwnd, 1.5, 20)
     first = tt.read()
     if "when launching" in first or "cannot find the file" in first:

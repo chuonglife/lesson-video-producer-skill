@@ -78,12 +78,16 @@ def main():
         print(read() or "free"); return 0
     if a[:1] == ["--release"]:
         LOCK.unlink(missing_ok=True); print("released"); return 0
-    if "--" not in a:
+    if a[:1] in (["-h"], ["--help"]):
+        print(__doc__); return 0
+    if "--" not in a or not a[a.index("--") + 1:]:
         print(__doc__); return 2
     cmd = a[a.index("--") + 1:]
     acquire(" ".join(cmd))
     try:
         return subprocess.run(cmd).returncode
+    except FileNotFoundError:
+        print(f"[gpu_lock] program not found: {cmd[0]}"); return 127
     finally:
         release()
 

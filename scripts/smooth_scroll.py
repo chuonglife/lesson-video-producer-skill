@@ -121,7 +121,7 @@ def smooth_by_segments(a):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("src"); ap.add_argument("dst")
     ap.add_argument("--fixed-top", dest="fixed_top", type=int, default=0)
     ap.add_argument("--fixed-bottom", dest="fixed", type=int, default=0)
@@ -131,6 +131,8 @@ def main():
     ap.add_argument("--work-dir", dest="work_dir"); ap.add_argument("--keep-work", action="store_true")
     ap.add_argument("--min-segment", dest="min_segment", type=float, default=3.0, help="pieces not longer than this (s) are left as they are")
     a = ap.parse_args()
+    import preflight
+    preflight.need("ffmpeg", "ffprobe")
     if a.segments:
         return smooth_by_segments(a)
     W, H = probe(a.src)

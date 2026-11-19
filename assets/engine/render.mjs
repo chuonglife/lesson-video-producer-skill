@@ -28,7 +28,19 @@ const CANDIDATES = [
   path.join(os.homedir(), 'AppData', 'Local', 'Google', 'Chrome', 'Application', 'chrome.exe'),
 ];
 const CHROME = CANDIDATES.find(p => p && fs.existsSync(p));
-if (!CHROME) { console.error('Chrome, Chromium or Edge not found. Set CHROME_PATH to the browser executable.'); process.exit(2); }
+if (!CHROME) {
+  console.error('Chrome, Chromium or Edge was not found. Install one (Windows: winget install Google.Chrome; macOS: brew install --cask google-chrome; '
+    + 'Linux: sudo apt install chromium) or set CHROME_PATH to the browser executable, then open a new terminal and run again.');
+  process.exit(2);
+}
+// Bump when the ffmpeg arguments of a segment change, so segments cached by an older version are rendered again.
+const ENCODE_VERSION = 2;
+const TO_BT709 = 'scale=in_range=full:out_range=limited:in_color_matrix=bt601:out_color_matrix=bt709:flags=bicubic+accurate_rnd+full_chroma_int,'
+  + 'format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709';
+const noFfmpeg = e => e && e.code === 'ENOENT'
+  ? new Error('ffmpeg was not found on the PATH. Install it (Windows: winget install Gyan.FFmpeg; macOS: brew install ffmpeg; '
+    + 'Linux: sudo apt install ffmpeg), open a new terminal and run again.')
+  : e;
 const [, , cmd, boardPath, tlPath, ...rest] = process.argv;
 if (!cmd || !boardPath || !tlPath) { console.error('Commands: plan | sheet | video (see the top of this file)'); process.exit(2); }
 
@@ -124,7 +136,7 @@ async function video() {
     const lines = tl.lines.slice(s.from_line - 1, s.to_line).map(l => [+(l.start - sl.t0).toFixed(3), +(l.end - sl.t0).toFixed(3),
       +((l.speech_start ?? l.start) - sl.t0).toFixed(3), +((l.speech_end ?? l.end) - sl.t0).toFixed(3)]);
     const key = full ? null : md5(JSON.stringify({
-      engineHash, fps, crf, png: img(s.image), slide: s, lines, cursor: board.cursor === true, colors: board.colors,
+      enc: ENCODE_VERSION, engineHash, fps, crf, png: img(s.image), slide: s, lines, cursor: board.cursor === true, colors: board.colors,
       span: +(sl.t1 - sl.t0).toFixed(3), phase: +((f0 / fps) - sl.t0).toFixed(4), first: i === 0,
       prev: p ? { png: img(p.image), regions: p.regions, kb: p.ken_burns, type: p.type } : null,
     }));
@@ -135,11 +147,18 @@ async function video() {
   let reused = 0, rendered = 0;
   const renderSegment = async (page, sg) => {
     const tmp = sg.file + '.tmp.mp4';
+    // The screenshots are JPEG: full-range BT.601. Without a conversion ffmpeg keeps that range and the file comes out as
+    // yuvj420p / bt470bg, which some players and platforms show washed out or too dark. Convert to the HD standard:
+    // limited range, BT.709, and say so in the stream.
     const args = ['-y', '-loglevel', 'error', '-f', 'image2pipe', '-framerate', String(fps), '-c:v', 'mjpeg', '-i', 'pipe:0',
-      '-c:v', 'libx264', '-preset', 'medium', '-crf', String(crf), '-pix_fmt', 'yuv420p', '-r', String(fps), '-g', String(fps * 2), '-keyint_min', String(fps * 2),
+      '-vf', TO_BT709,
+      '-c:v', 'libx264', '-preset', 'medium', '-crf', String(crf), '-pix_fmt', 'yuv420p',
+      '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709',
+      '-r', String(fps), '-g', String(fps * 2), '-keyint_min', String(fps * 2),
       '-sc_threshold', '0', '-video_track_timescale', String(fps * 1000), '-an', tmp];
     const ff = spawn('ffmpeg', args, { stdio: ['pipe', 'inherit', 'inherit'] });
-    const done = new Promise((res, rej) => ff.on('close', c => c === 0 ? res() : rej(new Error('ffmpeg exit ' + c))));
+    const done = new Promise((res, rej) => { ff.on('error', e => rej(noFfmpeg(e))); ff.on('close', c => c === 0 ? res() : rej(new Error('ffmpeg exit ' + c))); });
+    ff.stdin.on('error', () => {});   // a missing or failed ffmpeg is reported by the handlers above, not as an EPIPE
     let prevState = null, prevBuf = null;
     for (let f = sg.f0; f < sg.f1; f++) {
       const st = await page.evaluate(t => window.__render(t), f / fps);
@@ -164,7 +183,8 @@ async function video() {
   const args = ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', list];
   if (hasAudio) args.push('-i', audio, '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11', '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-t', String(duration));
   args.push('-c:v', 'copy', '-movflags', '+faststart', outMp4);
-  await new Promise((res, rej) => spawn('ffmpeg', args, { stdio: 'inherit' }).on('close', c => c === 0 ? res() : rej(new Error('ffmpeg concat exit ' + c))));
+  await new Promise((res, rej) => spawn('ffmpeg', args, { stdio: 'inherit' }).on('error', e => rej(noFfmpeg(e)))
+    .on('close', c => c === 0 ? res() : rej(new Error('ffmpeg concat exit ' + c))));
   // keep the 60 most recent unused segments so you can switch back and forth while editing
   const keep = new Set(segs.map(sg => path.basename(sg.file)));
   fs.readdirSync(segDir).filter(f => f.endsWith('.mp4') && !keep.has(f))

@@ -56,6 +56,8 @@ def two_lines(text):
 def main():
     if len(sys.argv) < 3 or sys.argv[1] in ("-h", "--help"):
         print(__doc__); sys.exit(0 if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help") else 2)
+    if not Path(sys.argv[1]).is_file():
+        raise SystemExit(f"timeline not found: {sys.argv[1]} (make_voice.py writes it)")
     tl = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     out = sys.argv[2]
     cues, n = [], 1
